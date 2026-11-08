@@ -1,0 +1,15 @@
+.DS_Store
+.env
+.env.*
+.playwright-cli/
+.venv/
+__pycache__/
+*.pyc
+data/
+Match Recordings/
+models/
+runs/
+ui/node_modules/
+ui/dist/
+ui/playwright-report/
+ui/test-results/

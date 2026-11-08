@@ -1,0 +1,6 @@
+ultralytics==8.4.91
+fastapi==0.162.2
+uvicorn==0.54.0
+python-multipart==0.0.33
+scipy==1.18.1
+opencv-python==5.0.0.93
