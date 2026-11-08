@@ -33,7 +33,7 @@ The website build and Python runtime live under `~/Library/Application Support/P
 
 1. **Import video** and choose a continuous view that shows the field and Hive openings.
 2. **Calibrate & analyze**. Draw a tight box around each robot on a clear frame and enter its team number and alliance. Add keyframes wherever a robot is obscured or its track drifts.
-3. Check the Hive Cell zones and match clock. Use **Follow camera motion** for handheld clips. A fixed camera gives the best view of a ball crossing the opening.
+3. Check the Hive Cell zones and match clock. Mark each visible Flower separately from the top ring to the middle ring. Use **Follow camera motion** for handheld clips. A fixed camera gives the best view of a ball crossing the opening.
 4. Select a team, then filter the event log for **Launches**, **Hive entries**, **Retained pieces**, **Nectar pickups**, or **Penalties**. Review uncertain events and use **Watch release** when a linked shot is available.
 5. Open **Defense review** for a robot’s performance comment, scoring highlight, and pressure clips. Use **Add comment** to save a note for the selected robot at the playhead. Find saved notes under **Comments** in the event log.
 6. Use **Teamwork fluidity** to compare each alliance’s scoring rhythm and watch clips where teammates took turns at the Hive. The estimate weights the split of confirmed Hive entries and quick switches between teammates equally. A switch is quick when consecutive entries by different robots are within 12 seconds.
@@ -46,7 +46,9 @@ The website build and Python runtime live under `~/Library/Application Support/P
 | Final | Pieces still scoring after play ends |
 | Penalty points | Reviewed referee calls that award points to the other alliance |
 
-Machine suggestions require review. A dash means no count has been verified. Camera cuts, small balls, overlapping volleys, and occlusion can hide a release or an entry. The defense rating measures tracked pressure against a target of 10% of play with an opponent visible. Zero means sufficient shared tracking with no qualifying pressure clips. A dash means too little shared tracking. The pressure clips and scouting observations give context for that estimate. See the [FIRST BIOBUZZ competition manual](https://ftc-resources.firstinspires.org/ftc/archive/2027/game/manual) for official scoring and referee rules.
+Machine suggestions require review. A dash means no count has been verified. Camera cuts, small balls, overlapping volleys, and occlusion can hide a release or an entry. The defense rating combines direct pressure with lane blocks and holds where an approaching opponent slows or turns. Lane time outside direct pressure counts at half weight. The total is measured against 10% of play with an opponent visible. Use the clips to check what happened, including whether apparent lane defense was intentional.
+
+Flower analysis uses projected partial overlap with the marked scoring volume. It estimates ownership from the highest visible Nectar and the bottom bonus from the lowest visible Nectar. For robot attribution, the tracker looks for a supported top entry. Early Nectar is a separate G410 candidate and can still appear in the final contents. A single camera can obscure depth and tightly stacked pieces. Review those candidates using §10.5.2, G410, and G418 in the [FIRST BIOBUZZ competition manual](https://ftc-resources.firstinspires.org/ftc/archive/2027/game/manual).
 
 ## Models and optional training
 

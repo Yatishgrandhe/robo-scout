@@ -2,12 +2,11 @@ import { Flag, MessageSquarePlus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { scoringSetupIssues, timecode } from "@/types";
-import type { Defense, Evidence, Match, RobotScouting } from "@/types";
+import type { Defense, Evidence, FlowerEvidence, Match, RobotScouting } from "@/types";
 
 export function DefenseReview({ team, defense, scouting, seek, addComment, saving }: {
   team: string; defense?: Defense; scouting?: RobotScouting; seek: (time: number) => void; addComment: () => void; saving: boolean;
 }) {
-  const clips = defense?.episodes.length ?? 0;
   const highlight = scouting?.clip;
   return <section className="defense-detail" aria-labelledby="defense-heading">
     <div className="defense-heading">
@@ -19,15 +18,39 @@ export function DefenseReview({ team, defense, scouting, seek, addComment, savin
       Watch {timecode(highlight.time)} · {highlight.title}
     </Button>}
     {defense ? <>
-      <p><strong>Tracked defense</strong> {defense.pressure_seconds}s of pressure across {defense.observed_seconds}s with an opponent visible. {defense.rating == null
+      <p><strong>Tracked defense</strong> {defense.pressure_seconds}s of direct pressure{defense.lane_seconds != null && ` · ${defense.lane_seconds}s of lane defense outside direct pressure`} · {defense.observed_seconds}s with an opponent visible. {defense.rating == null
         ? "More shared tracking is needed for a rating."
-        : defense.rating === 0 ? "No qualifying pressure clips. Review off-ball positioning and lane coverage separately."
-        : "Watch the clips to see how the robot closed space."}</p>
-      {clips > 0 && <div className="defense-clips">{defense.episodes.map(episode =>
-        <Button key={episode.start} variant="ghost" size="sm" onClick={() => seek(episode.start)}>
-          {timecode(episode.start)} · vs. {episode.opponent}
-        </Button>)}</div>}
+        : defense.lane_seconds == null ? "Lane defense needs a new analysis for this recording."
+        : "Lane estimates carry half the weight of direct pressure."}</p>
+      {defense.reviewed_clips?.map(clip => <p key={clip.time}><strong>Footage review</strong> {clip.comment} <Button
+        variant="ghost" size="sm" onClick={() => seek(clip.time)}>Watch {timecode(clip.time)}</Button></p>)}
+      {(defense.episodes.length > 0 || !!defense.lane_episodes?.length) && <details className="alliance-method defense-evidence">
+        <summary>Tracked defense clips</summary>
+        <div className="defense-clips">
+          {defense.episodes.map(episode => <Button key={episode.start} variant="ghost" size="sm" onClick={() => seek(episode.start)}>
+            {timecode(episode.start)} · Pressure vs. {episode.opponent}
+          </Button>)}
+          {defense.lane_episodes?.map(episode => <Button key={`${episode.start}-${episode.opponent}`} variant="ghost" size="sm" onClick={() => seek(episode.start)}>
+            {timecode(episode.start)} · {episode.kind === "lane_hold" ? "Lane hold" : "Lane block"} vs. {episode.opponent}
+          </Button>)}
+        </div>
+      </details>}
     </> : <p>Defense observations appear after tracking opposing robots together.</p>}
+  </section>;
+}
+
+export function FlowerReview({ flowers, time, seek }: {
+  flowers: FlowerEvidence[]; time?: number | null; seek: (time: number) => void;
+}) {
+  return <section className="ledger" aria-labelledby="flower-review-heading">
+    <div className="ledger-heading"><div><h2 id="flower-review-heading">Visible Flower contents</h2>
+      <p>Camera estimates after settling. Check depth and Nectar order against the footage.</p></div>
+      {time != null && <Button variant="outline" size="sm" onClick={() => seek(time)}>View frame</Button>}</div>
+    <ul className="flower-results">{flowers.map((flower, index) => <li key={flower.zone}>
+      <strong>Flower {index + 1}</strong>
+      <span>{flower.pieces.pollen} Pollen · {flower.pieces.red_nectar} Red Nectar · {flower.pieces.blue_nectar} Blue Nectar</span>
+      <small>Owner {flower.owner ?? "unresolved"} · Bottom Nectar {flower.bottom_nectar ?? "unresolved"}</small>
+    </li>)}</ul>
   </section>;
 }
 

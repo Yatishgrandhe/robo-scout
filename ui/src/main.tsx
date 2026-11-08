@@ -8,7 +8,7 @@ import { Calibration } from "@/calibration";
 import { EventDialog, EventLog } from "@/events";
 import { isAnchorMark, isTeamMark, Player } from "@/player";
 import type { Mark } from "@/player";
-import { AllianceTeamwork, DefenseReview, RobotStats } from "@/robot-stats";
+import { AllianceTeamwork, DefenseReview, FlowerReview, RobotStats } from "@/robot-stats";
 import { api, isReviewEvent, json, timecode } from "@/types";
 import type { Alliance, Box, EventRow, Match, Options, Piece, Setup, Status, TeamEvidence } from "@/types";
 import "./index.css";
@@ -173,7 +173,7 @@ function App() {
 
   function download() {
     if (!match) return;
-    const blob = new Blob([JSON.stringify({ ...match, defense: evidence.defense }, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify({ ...match, defense: evidence.defense, flowers: evidence.end_flowers }, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -305,6 +305,7 @@ function App() {
                 `${alliance === "red" ? "Red" : "Blue"} · ${pieces.pollen} Pollen, ${pieces.nectar} Nectar`).join("  /  ")}</span>
               <small>Camera estimate. Team attribution is reviewed separately.</small>
             </div>}
+            {!!evidence.end_flowers?.length && <FlowerReview flowers={evidence.end_flowers} time={evidence.flower_time} seek={watchFootage} />}
             <RobotStats match={viewedMatch} evidence={activeTeam
               ? { ...evidence, coverage: evidence.team_coverage?.[activeTeam.team] ?? null } : evidence} openSetup={openCalibration}
               finalCellsAttributed={!!activeTeam && assignedCells[activeTeam.alliance] === match.official_cells?.[activeTeam.alliance]} />

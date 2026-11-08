@@ -23,7 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from .defense import pressure_rating
+from .defense import add_lane_defense, defense_rating
 from .rules import BALL_EVENTS, EVENT_KINDS, FOUL_POINTS, MANUAL, NECTAR_COLORS, PIECE_EVENTS, SHOT_EVENTS, event, event_piece, penalty_points, summarize
 from .scouting import scouting_report
 
@@ -390,14 +390,29 @@ def new_robot_review(match: str):
 
 @app.get("/api/matches/{match}/frames")
 def frames(match: str):
-    metadata(match)
+    meta = metadata(match)
     path = folder_for(match) / "result.json"
     if not path.is_file():
         return {"frames": [], "warnings": [], "coverage": None, "segmentation": False}
     result = read(path)
-    # Apply the current scale to saved evidence without rerunning tracking.
-    for defense in result.get("defense", {}).values():
-        defense["rating"] = pressure_rating(defense["pressure_seconds"], defense["observed_seconds"], defense["coverage"])
+    defense = result.get("defense", {})
+    config = meta.get("config") or {}
+    # Legacy fixed-camera tracks can be rescored directly. Moving-camera runs need their original transforms.
+    if defense and not config.get("camera_motion") and any("lane_seconds" not in row for row in defense.values()):
+        roster = review_roster(meta)
+        if defense.keys() <= roster.keys() and meta.get("width") and meta.get("height"):
+            add_lane_defense(defense, result.get("frames", []), roster, (meta["width"], meta["height"]), config.get("start_time"))
+    for row in defense.values():
+        row["rating"] = defense_rating(row)
+    clip_review = path.with_name("defense-review.json")
+    if defense and clip_review.is_file():
+        for team, clips in read(clip_review).items():
+            if team in defense:
+                defense[team]["reviewed_clips"] = clips
+    flower_review = path.with_name("flower-review.json")
+    if not result.get("end_flowers") and flower_review.is_file():
+        review = read(flower_review)
+        result.update(end_flowers=review["contents"], flower_time=review["time"])
     return {key: value for key, value in result.items() if key != "events"}
 
 

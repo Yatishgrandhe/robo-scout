@@ -71,6 +71,13 @@ export type Frame = { time: number; robot: Box | null; robots?: Record<string, B
   mask?: [number, number][]; zones?: Box[]; balls: { class: string; box: Box }[] };
 export type Defense = { rating: number | null; pressure_seconds: number; observed_seconds: number; coverage: number;
   episodes: { start: number; end: number; opponent: string }[];
+  lane_seconds?: number;
+  lane_episodes?: { start: number; end: number; opponent: string; kind: "lane_block" | "lane_hold" }[];
+  reviewed_clips?: { time: number; comment: string }[];
+};
+export type FlowerEvidence = {
+  zone: number; owner: Alliance | null; bottom_nectar: Alliance | null;
+  pieces: { pollen: number; red_nectar: number; blue_nectar: number };
 };
 export type RobotScouting = { comment: string; clip: { time: number; title: string } | null };
 export type AllianceScouting = { rating: number | null; entries: Record<string, number>; transitions: number;
@@ -81,6 +88,8 @@ export type Evidence = { frames: Frame[]; warnings: string[]; coverage: number |
 export type TeamEvidence = Evidence & {
   defense?: Record<string, Defense>; team_coverage?: Record<string, number>;
   end_cells?: Partial<Record<Alliance, { pollen: number; nectar: number }>>;
+  end_flowers?: FlowerEvidence[];
+  flower_time?: number | null;
 };
 export type Options = { models: Record<Model, boolean>; sam: boolean };
 export const zoneNames: Record<ZoneKind, string> = { hive: "Hive structure", cell: "Hive Cell", flower: "Flower", garden: "Garden" };

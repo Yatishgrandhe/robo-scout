@@ -11,6 +11,7 @@ from scipy.optimize import linear_sum_assignment
 from .camera import CameraRegistration
 from .defense import defensive_ratings
 from .field_detection import detect_field
+from .flowers import BALL_HUES, FlowerVisit, early_flower_nectar, final_flowers, flower_at, flower_detections, observe_flower, settled_in_flower
 from .robot_recovery import AppearanceRecovery
 from .rules import event
 from .track_refinement import refine_roster
@@ -18,8 +19,7 @@ from .track_refinement import refine_roster
 ROOT = Path(__file__).resolve().parents[1]
 MODELS = ROOT / "models"
 BALLS = {"pollen", "red_nectar", "blue_nectar"}
-FINAL_ZONES = {"cell": ("cell_ball", "§10.5.1"),
-               "flower": ("flower_ball", "§10.5.2"), "garden": ("garden_ball", "§10.5.3")}
+FINAL_ZONES = {"cell": ("cell_ball", "§10.5.1"), "garden": ("garden_ball", "§10.5.3")}
 
 
 def center(box):
@@ -204,9 +204,8 @@ def color_detections(frame):
     hsv = cv.cvtColor(frame, cv.COLOR_BGR2HSV)
     minimum = max(5, round(h * .009) ** 2)
     maximum = (h * .073) ** 2
-    ranges = {"pollen": [(19, 40)], "red_nectar": [(0, 9), (170, 179)], "blue_nectar": [(91, 132)]}
     found = []
-    for kind, hues in ranges.items():
+    for kind, hues in BALL_HUES.items():
         mask = np.zeros((h, w), np.uint8)
         for lo, hi in hues:
             mask |= cv.inRange(hsv, (lo, 105, 85), (hi, 255, 255))
@@ -232,8 +231,10 @@ class BallTrack:
     release: float | None = None
     release_team: str | None = None
     arrivals: dict = field(default_factory=dict)
+    flower_visit: FlowerVisit | None = None
+    flower_volumes: dict = field(default_factory=dict)
 
-    def update(self, now, box, robot, zones):
+    def update(self, now, box, robot, zones, flowers, primary):
         point = center(box)
         if isinstance(robot, dict):
             nearby = [team for team, target in robot.items() if target is not None and inside(point, target, .015)]
@@ -251,8 +252,12 @@ class BallTrack:
                 self.release = now
                 if isinstance(robot, dict):
                     self.release_team = recent[-1][2]
+        if flowers:
+            observe_flower(self, now, box, flowers, primary)
         self.samples.append((now, box, close))
         for index, zone in enumerate(zones):
+            if zone.kind == "flower":
+                continue
             if not inside(point, zone.box):
                 self.arrivals.pop(index, None)
             elif index not in self.arrivals:
@@ -268,44 +273,43 @@ class BallTrack:
         return point
 
 
-def match_tracks(tracks, observations, time, robot, zones):
+def match_tracks(tracks, observations, time, robot, zones, primary):
     active = [track for track in tracks if time - track.samples[-1][0] <= .60]
+    flowers = {index: zone.box for index, zone in enumerate(zones) if zone.kind == "flower"}
     matched = set()
     if active and observations:
+        flower_hits = [flower_at(box, flowers) for _, box, _ in observations] if flowers else []
         cost = np.full((len(active), len(observations)), 10.0)
         for i, track in enumerate(active):
             expected = track.forecast(time)
+            visit = track.flower_visit
             for j, (kind, box, _) in enumerate(observations):
                 if track.kind == kind:
-                    cost[i, j] = np.linalg.norm(expected - center(box))
+                    point = center(box)
+                    if visit is not None and flower_hits[j] is not None:
+                        if visit.zone != flower_hits[j]:
+                            continue
+                        if time - visit.entered >= .25:
+                            local_distance = np.linalg.norm(center(track.samples[-1][1]) - point)
+                            if local_distance <= max(.009, .8 * max(box[2] - box[0], box[3] - box[1])):
+                                cost[i, j] = local_distance
+                            continue
+                    cost[i, j] = np.linalg.norm(expected - point)
         for i, j in zip(*linear_sum_assignment(cost)):
             if cost[i, j] <= .085:
-                active[i].update(time, observations[j][1], robot, zones)
+                active[i].update(time, observations[j][1], robot, zones, flowers, primary)
                 matched.add(j)
     for j, (kind, box, _) in enumerate(observations):
         if j not in matched:
             track = BallTrack(len(tracks) + 1, kind)
-            track.update(time, box, robot, zones)
+            track.update(time, box, robot, zones, flowers, primary)
             tracks.append(track)
 
 
 def early_nectar(tracks, now, zones, config, flagged):
     if config.start_time is None or not any(zone.kind == "flower" for zone in zones):
         return []
-    events = []
-    for track in tracks:
-        if track.release is None or track.samples[-1][0] != now or track.kind == "pollen":
-            continue
-        for zi, entered in track.arrivals.items():
-            key = track.id, zi
-            if (zones[zi].kind == "flower" and key not in flagged and config.start_time <= entered < config.start_time + 98
-                    and now - entered >= .25 and track.release <= entered):
-                flagged.add(key)
-                row = event("penalty", entered, "Possible early Nectar in Flower", "G410",
-                            severity="major", source="vision",
-                            evidence="Target-associated Nectar entered the marked Flower before the last 60 seconds. Verify placement and the field timer.")
-                events.append({**row, "team": track.release_team} if track.release_team is not None else row)
-    return events
+    return [row for track in tracks if (row := early_flower_nectar(track, now, config.start_time, flagged)) is not None]
 
 
 def connected_launch(track, launches, entered, used):
@@ -614,6 +618,13 @@ def analyze(video: Path, config, progress, launch_video: Path | None = None, hiv
             for proposal in proposals:
                 if not any(np.linalg.norm(center(proposal[1]) - center(found[1])) < .012 for found in observed):
                     observed.append(proposal)
+            flower_observed = []
+            for proposal in flower_detections(frame, zones):
+                point = center(proposal[1])
+                distance = max(.004, .55 * (proposal[1][2] - proposal[1][0]))
+                if not any(np.linalg.norm(point - center(found[1])) < distance for found in observed + flower_observed):
+                    flower_observed.append(proposal)
+            observed = flower_observed + observed
             boxes, prior = {}, {}
             for team, seed in roster.items():
                 if index == seeds[team]:
@@ -640,7 +651,7 @@ def analyze(video: Path, config, progress, launch_video: Path | None = None, hiv
                         boxes[team] = None
             robot = boxes[config.team]
             if not refine:
-                match_tracks(tracks, observed, now, boxes if multi else robot, zones)
+                match_tracks(tracks, observed, now, boxes if multi else robot, zones, config.team)
                 events.extend(early_nectar(tracks, now, zones, config, flagged))
             reference_frame = registration.stabilize(frame) if registration is not None else frame
             reference_gray = cv.cvtColor(reference_frame, cv.COLOR_BGR2GRAY) if registration is not None else gray
@@ -681,7 +692,7 @@ def analyze(video: Path, config, progress, launch_video: Path | None = None, hiv
                 warnings.append("Bidirectional tracking was unavailable. Using the forward tracks.")
             for frame in frames:
                 observations = [(ball["class"], np.asarray(ball["box"]), ball["confidence"]) for ball in frame["balls"]]
-                match_tracks(tracks, observations, frame["time"], frame["robots"], config.zones)
+                match_tracks(tracks, observations, frame["time"], frame["robots"], config.zones, config.team)
                 events.extend(early_nectar(tracks, frame["time"], config.zones, config, flagged))
         final_time = frames[-1]["time"]
         if multi:
@@ -736,10 +747,14 @@ def analyze(video: Path, config, progress, launch_video: Path | None = None, hiv
                 row["trajectory"] = hit.path
                 events.append({**row, "team": launch["team"]} if multi else row)
         end_cells = {}
+        end_flowers = []
         used_launches = set()
         if config.end_time is not None and abs(final_time - config.end_time) <= max(.35, 2 / config.sample_fps):
+            max_stale = max(.28, 1.5 / config.sample_fps)
+            end_flowers, flower_events = final_flowers(tracks, config.zones, final_time, max_stale, roster)
+            events.extend(flower_events)
             for track in tracks:
-                if final_time - track.samples[-1][0] > max(.28, 1.5 / config.sample_fps):
+                if final_time - track.samples[-1][0] > max_stale or settled_in_flower(track, final_time, max_stale):
                     continue
                 cell_hits = [(zi, entered) for zi, entered in track.arrivals.items()
                              if config.zones[zi].kind == "cell" and final_time - entered >= .4]
@@ -776,7 +791,6 @@ def analyze(video: Path, config, progress, launch_video: Path | None = None, hiv
                     continue
                 kind, rule = FINAL_ZONES[zone.kind]
                 detail = {"cell": "Check that this was the upward-facing Cell after settling.",
-                          "flower": "Check the scoring volume and which alliance owns the Flower.",
                           "garden": "Check that the ball overlaps the alliance Garden."}[zone.kind]
                 row = event(kind, final_time, f"Possible final {track.kind.replace('_', ' ').title()} in {zone.kind.title()}",
                             rule, source="vision", piece=track.kind,
@@ -798,6 +812,8 @@ def analyze(video: Path, config, progress, launch_video: Path | None = None, hiv
                 "effective_setup": effective,
                 "defense": defense,
                 "end_cells": end_cells,
+                "end_flowers": end_flowers,
+                "flower_time": final_time if end_flowers else None,
                 "team_coverage": {team: round(sum(frame["robots"][team] is not None for frame in frames) / len(frames), 3)
                                   for team in roster} if multi else {},
                 "shot_scan": config.scan_shots, "entry_scan": bool(cells), "pickup_scan": True, "launch_count": len(launches), "hive_changes": [

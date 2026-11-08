@@ -99,12 +99,13 @@ export function Calibration({ setup, setSetup, match, time, options, drawing, ar
         <h3>Scoring zones</h3><p>Robo Scout looks for visible Hive Cells. You can adjust the zones or add Flowers and Gardens.</p>
         <div className="zone-controls">
           <select aria-label="Zone type" value={zone} onChange={e => setZone(e.target.value as ZoneKind)}>{Object.entries(zoneNames).map(([kind, label]) => <option key={kind} value={kind}>{label}</option>)}</select>
-          <select aria-label="Zone alliance" value={zoneAlliance} onChange={e => setZoneAlliance(e.target.value as Setup["alliance"])}><option value="red">Red</option><option value="blue">Blue</option></select>
+          {zone !== "flower" && <select aria-label="Zone alliance" value={zoneAlliance} onChange={e => setZoneAlliance(e.target.value as Setup["alliance"])}><option value="red">Red</option><option value="blue">Blue</option></select>}
           <Button variant="outline" size="sm" disabled={setup.zones.length >= 32} onClick={() => arm(drawing === zone ? null : zone)}><BoxSelect data-icon="inline-start" /> Draw zone</Button>
         </div>
+        {zone === "flower" && <p>Draw the inside of one Flower from the top ring to the middle ring. Mark each visible Flower separately.</p>}
         {setup.zones.length > 0 && <ul className="zone-list">{setup.zones.map((item, i) => <li key={i}>
-          {zoneNames[item.kind]} · {item.alliance}{item.automatic ? " · detected" : ""}
-          <Button variant="ghost" size="icon-xs" aria-label={`Remove ${item.alliance} ${zoneNames[item.kind]} ${i + 1}`}
+          {zoneNames[item.kind]}{item.kind !== "flower" && ` · ${item.alliance}`}{item.automatic ? " · detected" : ""}
+          <Button variant="ghost" size="icon-xs" aria-label={`Remove ${item.kind === "flower" ? "" : `${item.alliance} `}${zoneNames[item.kind]} ${i + 1}`}
             onClick={() => change("zones", setup.zones.filter((_, index) => i !== index))}><X /></Button>
         </li>)}</ul>}
       </div>

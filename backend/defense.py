@@ -1,6 +1,7 @@
 """Estimate sustained opponent pressure from jointly visible robot tracks."""
 
 FULL_RATING_PRESSURE_SHARE = .10
+LANE_CREDIT = .5
 
 
 def pressure_rating(pressure_seconds, observed_seconds, coverage):
@@ -10,6 +11,85 @@ def pressure_rating(pressure_seconds, observed_seconds, coverage):
         return 0
     target = observed_seconds * FULL_RATING_PRESSURE_SHARE
     return max(1, round(100 * min(1, pressure_seconds / target)))
+
+
+def defense_rating(evidence):
+    return pressure_rating(evidence["pressure_seconds"] + LANE_CREDIT * evidence.get("lane_seconds", 0),
+                           evidence["observed_seconds"], evidence["coverage"])
+
+
+def add_lane_defense(results, frames, alliances, shape, start_time, transforms=None):
+    """Look for a defender in an opponent's approach when that opponent slows or turns."""
+    import numpy as np
+
+    if len(frames) < 4 or not results:
+        return
+    times = np.asarray([frame["time"] for frame in frames])
+    dt = float(np.median(np.diff(times)))
+    if dt <= 0:
+        return
+    stride = max(1, round(.45 / dt))
+    minimum = max(2, round(.32 / dt))
+    if len(frames) <= 2 * stride:
+        return
+    before = np.arange(stride, len(frames) - stride)
+    earlier, after = before - stride, before + stride
+    continuous = np.r_[0, np.cumsum(np.diff(times) > 1.65 * dt)]
+    eligible = continuous[earlier] == continuous[after]
+    if start_time is not None:
+        eligible &= (times[earlier] >= start_time + 38) & (times[after] <= start_time + 158)
+    positions, widths, visible_runs = {}, {}, {}
+    for team in alliances:
+        boxes = np.asarray([(frame.get("robots") or {}).get(team) or [np.nan] * 4 for frame in frames]) * (*shape, *shape)
+        feet = np.column_stack(((boxes[:, 0] + boxes[:, 2]) / 2, boxes[:, 3]))
+        if transforms is not None and len(transforms):
+            affine = np.asarray(transforms)
+            feet = np.einsum("nij,nj->ni", affine[:, :, :2], feet) + affine[:, :, 2]
+        positions[team] = feet
+        widths[team] = boxes[:, 2] - boxes[:, 0]
+        visible_runs[team] = np.r_[0, np.cumsum([
+            not np.isfinite(feet[i]).all() or team in frame.get("reanchored", ()) for i, frame in enumerate(frames)
+        ])]
+
+    for team, evidence in results.items():
+        lanes = []
+        active = np.zeros(len(times), bool)
+        direct = np.zeros(len(times), bool)
+        for episode in evidence["episodes"]:
+            direct |= (times >= episode["start"]) & (times < episode["end"] - .001)
+        for other, alliance in alliances.items():
+            if alliance == alliances.get(team) or team not in positions:
+                continue
+            own, rival = positions[team], positions[other]
+            width = (widths[team][before] + widths[other][before]) / 2
+            incoming = (rival[before] - rival[earlier]) / width[:, None]
+            outgoing = (rival[after] - rival[before]) / width[:, None]
+            speed = np.linalg.norm(incoming, axis=1)
+            heading = incoming / np.maximum(speed[:, None], .001)
+            offset = (own[before] - rival[before]) / width[:, None]
+            along = (offset * heading).sum(axis=1)
+            sideways = np.linalg.norm(offset - heading * along[:, None], axis=1)
+            advance = (outgoing * heading).sum(axis=1)
+            retreat = np.linalg.norm(own[after] - rival[after], axis=1) / width
+            own_motion = np.linalg.norm(own[after] - own[earlier], axis=1) / width
+            own_run, rival_run = visible_runs[team], visible_runs[other]
+            clear = ((own_run[earlier] == own_run[after + 1]) & (rival_run[earlier] == rival_run[after + 1]))
+            blocks = (eligible & clear & (speed >= .30) & (speed <= 2.1) & (along >= .60) & (along <= 1.85)
+                      & (sideways <= .42) & (advance <= .65 * speed) & (retreat <= 2.25))
+            edges = np.flatnonzero(np.diff(np.r_[False, blocks, False]))
+            for first, last in zip(edges[::2], edges[1::2]):
+                if last - first < minimum:
+                    continue
+                start, end = before[first], after[last - 1]
+                if np.all(direct[start:end + 1]):
+                    continue
+                active[start:end + 1] = True
+                action = "lane_hold" if np.median(own_motion[first:last]) <= .45 else "lane_block"
+                lanes.append({"start": float(times[start]), "end": round(float(times[end] + dt), 3),
+                              "opponent": other, "kind": action})
+        evidence["lane_episodes"] = sorted(lanes, key=lambda episode: episode["start"])
+        evidence["lane_seconds"] = round(float(np.count_nonzero(active & ~direct)) * dt, 1)
+        evidence["rating"] = defense_rating(evidence)
 
 
 def defensive_ratings(frames, roster, shape, transforms, start_time):
@@ -77,4 +157,5 @@ def defensive_ratings(frames, roster, shape, transforms, start_time):
         results[team] = {"rating": pressure_rating(seconds, observed, coverage),
                          "pressure_seconds": seconds, "observed_seconds": observed,
                          "coverage": coverage, "episodes": episodes}
+    add_lane_defense(results, frames, {team: seed.alliance for team, seed in roster.items()}, shape, start_time, transforms)
     return results
