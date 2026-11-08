@@ -200,6 +200,19 @@ a { text-underline-offset: .2em; }
 .defense-heading h3 span { font-weight: 500; color: var(--muted-foreground); }
 .defense-detail strong { color: var(--foreground); margin-right: .2rem; }
 .defense-clips { margin-top: .3rem; }
+.single-scouting .defense-detail { border-top: 0; }
+.scout-highlight { height: auto; white-space: normal; text-align: left; justify-content: flex-start; margin-block: .25rem; }
+.alliance-review-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-block: 1px solid var(--border); }
+.alliance-review-grid section { padding: .75rem 1rem; }
+.alliance-review-grid section + section { border-left: 1px solid var(--border); }
+.alliance-review-grid h3 { display: flex; align-items: center; gap: .5rem; font-size: .875rem; font-weight: 650; }
+.alliance-rating { margin-left: auto; font: 650 .75rem var(--mono); }
+.alliance-method { padding: .5rem 1rem; color: var(--muted-foreground); font-size: .75rem; }
+.alliance-method summary { cursor: pointer; }
+@media (max-width: 520px) {
+  .alliance-review-grid { grid-template-columns: minmax(0, 1fr); }
+  .alliance-review-grid section + section { border-left: 0; border-top: 1px solid var(--border); }
+}
 .cell-evidence { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem .6rem; padding: .55rem .85rem; background: var(--secondary); border-radius: var(--radius); font-size: .79rem; }
 .cell-evidence small { color: var(--muted-foreground); }
 .roster-setup { margin: .85rem 0; padding: .7rem .85rem; background: var(--background); border: 1px solid var(--border); border-radius: var(--radius); }

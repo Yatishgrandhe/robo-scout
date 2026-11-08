@@ -4,8 +4,10 @@ FULL_RATING_PRESSURE_SHARE = .10
 
 
 def pressure_rating(pressure_seconds, observed_seconds, coverage):
-    if pressure_seconds <= 0 or observed_seconds < 10 or coverage < .35:
+    if observed_seconds < 10 or coverage < .35:
         return None
+    if pressure_seconds <= 0:
+        return 0
     target = observed_seconds * FULL_RATING_PRESSURE_SHARE
     return max(1, round(100 * min(1, pressure_seconds / target)))
 

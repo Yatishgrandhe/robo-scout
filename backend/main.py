@@ -25,6 +25,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .defense import pressure_rating
 from .rules import BALL_EVENTS, EVENT_KINDS, FOUL_POINTS, MANUAL, NECTAR_COLORS, PIECE_EVENTS, SHOT_EVENTS, event, event_piece, penalty_points, summarize
+from .scouting import scouting_report
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data"
@@ -222,6 +223,7 @@ def report(match):
         for seed in ([config, *config.get("robots", [])] if config else []) if seed.get("team")
     }
     return {**meta, "events": rows, "team_summaries": summaries,
+            "scouting": scouting_report(review_roster(meta), primary, rows, summaries),
             "summary": summarize([row for row in rows if row.get("team", primary) == primary], config.get("alliance")),
             "manual": MANUAL, "ruleset": "BIOBUZZ TU08"}
 

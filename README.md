@@ -35,8 +35,9 @@ The website build and Python runtime live under `~/Library/Application Support/P
 2. **Calibrate & analyze**. Draw a tight box around each robot on a clear frame and enter its team number and alliance. Add keyframes wherever a robot is obscured or its track drifts.
 3. Check the Hive Cell zones and match clock. Use **Follow camera motion** for handheld clips. A fixed camera gives the best view of a ball crossing the opening.
 4. Select a team, then filter the event log for **Launches**, **Hive entries**, **Retained pieces**, **Nectar pickups**, or **Penalties**. Review uncertain events and use **Watch release** when a linked shot is available.
-5. Open **Defense review** for scouting observations and pressure clips. Use **Add comment** to save a note for the selected robot at the playhead. Find saved notes under **Comments** in the event log.
-6. Use **Library** to create folders, rename reviews, and move recordings. **Export review** saves the event log, including comments, and calibration as JSON.
+5. Open **Defense review** for a robot’s performance comment, scoring highlight, and pressure clips. Use **Add comment** to save a note for the selected robot at the playhead. Find saved notes under **Comments** in the event log.
+6. Use **Teamwork fluidity** to compare each alliance’s scoring rhythm and watch clips where teammates took turns at the Hive. The estimate weights the split of confirmed Hive entries and quick switches between teammates equally. A switch is quick when consecutive entries by different robots are within 12 seconds.
+7. Use **Library** to create folders, rename reviews, and move recordings. **Export review** saves the event log, calibration, scouting observations, and available defense estimates as JSON.
 
 | Count | What it measures |
 | --- | --- |
@@ -45,7 +46,7 @@ The website build and Python runtime live under `~/Library/Application Support/P
 | Final | Pieces still scoring after play ends |
 | Penalty points | Reviewed referee calls that award points to the other alliance |
 
-Machine suggestions require review. A dash means no count has been verified. Camera cuts, small balls, overlapping volleys, and occlusion can hide a release or an entry. The defense rating measures tracked pressure against a target of 10% of play with an opponent visible. It displays a dash when there is too little shared tracking or no clear pressure. The pressure clips and scouting observations give context for that estimate. See the [FIRST BIOBUZZ competition manual](https://ftc-resources.firstinspires.org/ftc/archive/2027/game/manual) for official scoring and referee rules.
+Machine suggestions require review. A dash means no count has been verified. Camera cuts, small balls, overlapping volleys, and occlusion can hide a release or an entry. The defense rating measures tracked pressure against a target of 10% of play with an opponent visible. Zero means sufficient shared tracking with no qualifying pressure clips. A dash means too little shared tracking. The pressure clips and scouting observations give context for that estimate. See the [FIRST BIOBUZZ competition manual](https://ftc-resources.firstinspires.org/ftc/archive/2027/game/manual) for official scoring and referee rules.
 
 ## Models and optional training
 

@@ -8,7 +8,7 @@ import { Calibration } from "@/calibration";
 import { EventDialog, EventLog } from "@/events";
 import { isAnchorMark, isTeamMark, Player } from "@/player";
 import type { Mark } from "@/player";
-import { DefenseReview, RobotStats } from "@/robot-stats";
+import { AllianceTeamwork, DefenseReview, RobotStats } from "@/robot-stats";
 import { api, isReviewEvent, json, timecode } from "@/types";
 import type { Alliance, Box, EventRow, Match, Options, Piece, Setup, Status, TeamEvidence } from "@/types";
 import "./index.css";
@@ -173,7 +173,7 @@ function App() {
 
   function download() {
     if (!match) return;
-    const blob = new Blob([JSON.stringify(match, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify({ ...match, defense: evidence.defense }, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -202,6 +202,9 @@ function App() {
   const config = match?.config;
   const roster = config?.robots?.length ? [config, ...config.robots] : [];
   const activeTeam = roster.find(seed => seed.team === selectedTeam) ?? roster[0];
+  const scoutingTeam = activeTeam?.team ?? config?.team;
+  const scoutingReview = scoutingTeam && <DefenseReview team={scoutingTeam} defense={evidence.defense?.[scoutingTeam]}
+    scouting={match?.scouting?.robots[scoutingTeam]} addComment={() => openEvent(true)} seek={watchFootage} saving={!!busy} />;
   const viewedMatch = match && activeTeam && config ? {
     ...match, config: { ...config, team: activeTeam.team, alliance: activeTeam.alliance },
     summary: match.team_summaries?.[activeTeam.team] ?? match.summary,
@@ -287,9 +290,10 @@ function App() {
                   })}</tbody>
                 </table>
               </div>
-              <DefenseReview team={activeTeam.team} defense={evidence.defense?.[activeTeam.team]}
-                addComment={() => openEvent(true)} seek={watchFootage} saving={!!busy} />
+              {scoutingReview}
             </section>}
+            {!activeTeam && scoutingReview && <div className="ledger single-scouting">{scoutingReview}</div>}
+            {match.scouting && <AllianceTeamwork alliances={match.scouting.alliances} seek={watchFootage} />}
             {match.official_cells ? <div className="cell-evidence">
               <strong>Official final Cell count</strong>
               <span>Red · {assignedCells.red} of {match.official_cells.red} attributed / Blue · {assignedCells.blue} of {match.official_cells.blue} attributed</span>

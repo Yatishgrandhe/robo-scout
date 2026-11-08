@@ -14,8 +14,9 @@ class DefenseRatingTest(unittest.TestCase):
         self.assertEqual(pressure_rating(12, 120, 1), 100)
         self.assertEqual(pressure_rating(24, 120, 1), 100)
 
-    def test_rating_requires_visible_pressure_and_enough_shared_tracking(self):
-        self.assertIsNone(pressure_rating(0, 120, 1))
+    def test_zero_pressure_gets_a_rating_when_shared_tracking_is_sufficient(self):
+        self.assertEqual(pressure_rating(0, 108.1, .9), 0)
+        self.assertIsNone(pressure_rating(0, 0, 0))
         self.assertIsNone(pressure_rating(1, 9.9, .9))
         self.assertIsNone(pressure_rating(1, 40, .34))
 

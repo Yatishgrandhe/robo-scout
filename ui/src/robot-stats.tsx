@@ -2,29 +2,69 @@ import { Flag, MessageSquarePlus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { scoringSetupIssues, timecode } from "@/types";
-import type { Defense, Evidence, Match } from "@/types";
+import type { Defense, Evidence, Match, RobotScouting } from "@/types";
 
-export function DefenseReview({ team, defense, seek, addComment, saving }: {
-  team: string; defense?: Defense; seek: (time: number) => void; addComment: () => void; saving: boolean;
+export function DefenseReview({ team, defense, scouting, seek, addComment, saving }: {
+  team: string; defense?: Defense; scouting?: RobotScouting; seek: (time: number) => void; addComment: () => void; saving: boolean;
 }) {
   const clips = defense?.episodes.length ?? 0;
+  const highlight = scouting?.clip;
   return <section className="defense-detail" aria-labelledby="defense-heading">
     <div className="defense-heading">
       <h3 id="defense-heading">Defense review <span>· Team {team}</span></h3>
       <Button variant="outline" size="sm" disabled={saving} onClick={addComment}><MessageSquarePlus data-icon="inline-start" /> Add comment</Button>
     </div>
+    {scouting && <p><strong>Performance comment</strong> {scouting.comment}</p>}
+    {highlight && <Button variant="ghost" size="sm" className="scout-highlight" onClick={() => seek(highlight.time)}>
+      Watch {timecode(highlight.time)} · {highlight.title}
+    </Button>}
     {defense ? <>
-      <p><strong>Auto scouting comment</strong> {clips > 0
-        ? `Tracking found ${clips === 1 ? "one moment" : `${clips} moments`} of pressure. Watch how the robot closes space and whether it holds the lane.`
-        : "Tracking found no clear pressure in this footage. Off-ball positioning and lane coverage are worth a closer look."}</p>
-      <p>{defense.pressure_seconds}s of tracked pressure over {defense.observed_seconds}s with an opponent visible. {defense.rating == null
-        ? "A rating needs visible pressure and enough shared tracking."
-        : "Full credit starts at 10% of visible play."}</p>
+      <p><strong>Tracked defense</strong> {defense.pressure_seconds}s of pressure across {defense.observed_seconds}s with an opponent visible. {defense.rating == null
+        ? "More shared tracking is needed for a rating."
+        : defense.rating === 0 ? "No qualifying pressure clips. Review off-ball positioning and lane coverage separately."
+        : "Watch the clips to see how the robot closed space."}</p>
       {clips > 0 && <div className="defense-clips">{defense.episodes.map(episode =>
         <Button key={episode.start} variant="ghost" size="sm" onClick={() => seek(episode.start)}>
           {timecode(episode.start)} · vs. {episode.opponent}
         </Button>)}</div>}
     </> : <p>Defense observations appear after tracking opposing robots together.</p>}
+  </section>;
+}
+
+export function AllianceTeamwork({ alliances, seek }: {
+  alliances: NonNullable<Match["scouting"]>["alliances"]; seek: (time: number) => void;
+}) {
+  const switchWindow = alliances.red?.switch_window ?? alliances.blue?.switch_window;
+  if (switchWindow == null) return null;
+  return <section className="ledger alliance-review" aria-labelledby="alliance-review-heading">
+    <div className="ledger-heading"><div><h2 id="alliance-review-heading">Teamwork fluidity</h2>
+      <p>Estimate of how evenly and quickly teammates took turns scoring in the Hive.</p></div></div>
+    <div className="alliance-review-grid">
+      {(["red", "blue"] as const).map(alliance => {
+        const data = alliances[alliance];
+        const name = alliance === "red" ? "Red alliance" : "Blue alliance";
+        return <section key={alliance} aria-label={name}>
+          <h3><span className={`alliance-dot alliance-${alliance}`} />{name}
+            <span className="alliance-rating">{data?.rating != null ? `${data.rating}/100` : "Unrated"}</span></h3>
+          {data ? <>
+            <p>Hive entries · {Object.entries(data.entries).map(([team, count]) => `${team} (${count})`).join(" · ")}</p>
+            <p>{data.rating == null ? "Review more Hive entries and scoring attempts from both robots for an estimate."
+              : `${data.switches.length} of ${data.transitions} scoring transitions switched robots within ${switchWindow}s.`}</p>
+            {data.rating != null && <p>{data.switches.length * 2 >= data.transitions
+              ? "Teammates frequently followed each other at the Hive. Review how they approached between turns."
+              : "Teammates more often scored in separate runs. Look for ways to set up the next turn earlier."}</p>}
+            {data.switches.length > 0 && <div className="defense-clips">
+              {data.switches.slice(0, 2).map(clip => <Button key={clip.start} variant="ghost" size="sm" onClick={() => seek(clip.start)}>
+                {timecode(clip.start)}–{timecode(clip.end)} · {clip.from_team} → {clip.to_team}
+              </Button>)}
+            </div>}
+          </> : <p>Mark both teammates in one review to compare their scoring rhythm.</p>}
+        </section>;
+      })}
+    </div>
+    <details className="alliance-method"><summary>How it’s measured</summary>
+      <p>Half the score comes from how evenly teammates split confirmed Hive entries. The other half comes from the share of consecutive scoring moments where the robot changed within {switchWindow}s. Use this estimate to review scoring rhythm.</p>
+    </details>
   </section>;
 }
 

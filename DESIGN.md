@@ -30,6 +30,7 @@ The player header carries the Robo Knights crest, a compact footage label, and s
 
 The robot ledger puts Pollen and Nectar in rows, with shots, successful Hive entries, and final pieces in separate columns. Penalty points and Nectar pickup checks sit below the table. Unavailable counts use a dash, and suggestions stay separate from confirmed counts. Selecting a launch trajectory shows its path over the footage. Portrait footage is centered and height-limited so the transport and launch controls remain reachable.
 For a match roster, team controls use written team numbers and alliance colors. Selecting a team changes its event log and robot stats while all marked tracks stay on the video. The defense estimate shows the visible time behind each rating and offers jumps to candidate pressure intervals.
+Scouting comments sit below the team table and include a jump to the supporting footage. The teamwork ledger pairs Red and Blue in two ruled columns that stack on narrow screens. Show scoring evidence and clip links alongside each estimate.
 The match library uses a graphite dialog with a muted folder rail and a ruled list of recording thumbnails, names, and durations. Dark pink marks the selected folder. New folder stays visible in the header, with rename and move beside the affected item. Edits happen inline with a labeled field and explicit save and cancel actions. On small screens, folder navigation sits above the recording list.
 
 ## 6. Motion

@@ -58,6 +58,7 @@ export type Match = MatchMeta & {
   open_attribution?: ("balls" | "tips")[];
   summary: { confirmed: ReviewCounts; suggested: ReviewCounts; pending: number };
   team_summaries?: Record<string, Match["summary"]>;
+  scouting?: { robots: Record<string, RobotScouting>; alliances: Partial<Record<Alliance, AllianceScouting>> };
   official_cells?: { red: number; blue: number; source: string };
 };
 type ReviewCounts = {
@@ -70,6 +71,10 @@ export type Frame = { time: number; robot: Box | null; robots?: Record<string, B
   mask?: [number, number][]; zones?: Box[]; balls: { class: string; box: Box }[] };
 export type Defense = { rating: number | null; pressure_seconds: number; observed_seconds: number; coverage: number;
   episodes: { start: number; end: number; opponent: string }[];
+};
+export type RobotScouting = { comment: string; clip: { time: number; title: string } | null };
+export type AllianceScouting = { rating: number | null; entries: Record<string, number>; transitions: number;
+  switches: { from_team: string; to_team: string; start: number; end: number }[]; switch_window: number;
 };
 export type Evidence = { frames: Frame[]; warnings: string[]; coverage: number | null; segmentation: boolean; device?: string;
   shot_scan?: boolean; pickup_scan?: boolean; entry_scan?: boolean };
