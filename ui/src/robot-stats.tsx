@@ -21,7 +21,7 @@ export function DefenseReview({ team, defense, scouting, seek, addComment, savin
       <p><strong>Tracked defense</strong> {defense.pressure_seconds}s of direct pressure{defense.lane_seconds != null && ` · ${defense.lane_seconds}s of lane defense outside direct pressure`} · {defense.observed_seconds}s with an opponent visible. {defense.rating == null
         ? "More shared tracking is needed for a rating."
         : defense.lane_seconds == null ? "Lane defense needs a new analysis for this recording."
-        : "Lane estimates carry half the weight of direct pressure."}</p>
+        : "The percentage uses only shared visible time. Lane defense counts at half weight."}</p>
       {defense.reviewed_clips?.map(clip => <p key={clip.time}><strong>Footage review</strong> {clip.comment} <Button
         variant="ghost" size="sm" onClick={() => seek(clip.time)}>Watch {timecode(clip.time)}</Button></p>)}
       {(defense.episodes.length > 0 || !!defense.lane_episodes?.length) && <details className="alliance-method defense-evidence">

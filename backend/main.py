@@ -216,6 +216,11 @@ def report(match):
     meta = metadata(match)
     rows = [{**row, "piece": event_piece(row), **({"penalty_points": penalty_points(row)} if row["kind"] == "penalty" else {})}
             for row in sorted(rows_for(match), key=lambda row: row["time"])]
+    shot_weights = ROOT / "models" / "shot-motion.json"
+    if shot_weights.is_file():
+        from .shot_model import prioritize_shots
+
+        prioritize_shots(rows, shot_weights)
     config = meta.get("config") or {}
     primary = config.get("team", "")
     summaries = {

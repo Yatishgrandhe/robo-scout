@@ -40,6 +40,7 @@ export type EventRow = {
   team?: string;
   penalty_points?: number;
   trajectory?: [number, number, number][];
+  shot_priority?: number;
   launch_time?: number;
   launch_id?: string;
 };

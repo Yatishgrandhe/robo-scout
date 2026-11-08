@@ -9,6 +9,78 @@ MAX_FLOWER_GAP = .32
 BALL_HUES = {"pollen": [(19, 40)], "red_nectar": [(0, 9), (170, 179)], "blue_nectar": [(91, 132)]}
 
 
+def merge_flower_detections(observations, proposals):
+    """Keep established boxes and add distinct crop detections."""
+    import numpy as np
+
+    accepted = []
+    for proposal in proposals:
+        _, box, _ = proposal
+        point = (box[:2] + box[2:]) / 2
+        duplicate = False
+        for _, existing, _ in (*observations, *accepted):
+            midpoint = (existing[:2] + existing[2:]) / 2
+            proximity = max(.004, .65 * max(box[2] - box[0], existing[2] - existing[0]))
+            intersection = np.prod(np.maximum(0, np.minimum(box[2:], existing[2:]) - np.maximum(box[:2], existing[:2])))
+            smaller = min(np.prod(box[2:] - box[:2]), np.prod(existing[2:] - existing[:2]))
+            if np.linalg.norm(point - midpoint) < proximity or (smaller > 0 and intersection >= .65 * smaller):
+                duplicate = True
+                break
+        if not duplicate:
+            accepted.append(proposal)
+    return accepted + observations
+
+
+def trained_flower_detections(frame, zones, model, device):
+    """Run the optional local model on Flower crops and keep color-supported proposals."""
+    import cv2 as cv
+    import numpy as np
+
+    height, width = frame.shape[:2]
+    scale = np.array((width, height, width, height))
+    crops, origins = [], []
+    for zone in zones:
+        if zone.kind != "flower":
+            continue
+        x0, y0, x1, y1 = np.rint(np.asarray(zone.box) * scale).astype(int)
+        bore = x1 - x0
+        if bore < 9 or y1 - y0 < 2 * bore:
+            continue
+        left, top = max(0, x0 - bore), max(0, y0 - bore)
+        crop = frame[top:min(height, y1 + bore), left:min(width, x1 + bore)]
+        crops.append(crop)
+        origins.append((left, top, x0, x1, bore))
+    if not crops:
+        return []
+    predictions = model.predict(crops, imgsz=320, conf=.025, max_det=32, device=device, verbose=False)
+    detections = []
+    for prediction, crop, (left, top, inner_left, inner_right, bore) in zip(predictions, crops, origins):
+        hsv = cv.cvtColor(crop, cv.COLOR_BGR2HSV)
+        for *coordinates, score, cls in prediction.boxes.data.cpu().numpy():
+            kind = prediction.names[int(cls)]
+            if kind not in BALL_HUES or (kind == "pollen" and score < .25):
+                continue
+            x0, y0, x1, y1 = np.rint(coordinates).astype(int)
+            if min(x1 - x0, y1 - y0) < 3 or max(x1 - x0, y1 - y0) > 1.2 * bore:
+                continue
+            pad = 0 if score < .10 else .25 * bore
+            if not inner_left - pad <= left + (x0 + x1) / 2 <= inner_right + pad:
+                continue
+            patch = hsv[max(0, y0):y1, max(0, x0):x1]
+            if not patch.size:
+                continue
+            mask = np.zeros(patch.shape[:2], np.uint8)
+            for lo, hi in BALL_HUES[kind]:
+                mask |= cv.inRange(patch, (lo, 65, 65), (hi, 255, 255))
+            # A dim Nectar candidate needs stronger color evidence from the same crop.
+            color_support = .40 if score < .25 else .20
+            if np.count_nonzero(mask) < color_support * mask.size:
+                continue
+            box = np.clip((np.array(coordinates) + (left, top, left, top)) / scale, 0, 1)
+            detections.append((kind, box, float(score)))
+    return detections
+
+
 def flower_detections(frame, zones):
     """Find separate color peaks in tight tube crops, including touching balls in a stack."""
     import cv2 as cv

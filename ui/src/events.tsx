@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { eventTitle, isPieceOutcome, isReviewEvent, isScoredPiece, kinds, labels, pieceNames, timecode } from "@/types";
 import type { EventRow, Kind, Match, Piece, ReviewKind, Status } from "@/types";
 
-const filters = ["All events", "Launches", "Hive entries", "Retained pieces", "Nectar pickups", "Penalties", "Comments", "Needs review", "Reviewed", "Dismissed"] as const;
+const filters = ["All events", "Launches", "Prioritized shots", "Hive entries", "Retained pieces", "Nectar pickups", "Penalties", "Comments", "Needs review", "Reviewed", "Dismissed"] as const;
 type Filter = typeof filters[number];
 
 function EventIcon({ kind }: { kind: Kind }) {
@@ -26,10 +26,12 @@ export function EventLog({ match, selected, select, seek, decide, add, working }
   decide: (row: EventRow, status: Status, piece?: Piece) => void; add: () => void; working: boolean;
 }) {
   const [filter, setFilter] = useState<Filter>("All events");
+  const hasShotPriorities = match.events.some(row => row.shot_priority != null);
   const rows = match.events.filter(row => {
     if (!isReviewEvent(row.kind)) return false;
     if (filter === "All events") return row.status !== "dismissed";
     if (filter === "Launches") return row.kind.endsWith("_launch") && row.status !== "dismissed";
+    if (filter === "Prioritized shots") return row.kind.endsWith("_launch") && row.status === "suggested";
     if (filter === "Hive entries") return row.kind === "cell_entry" && row.status !== "dismissed";
     if (filter === "Retained pieces") return isScoredPiece(row.kind) && row.status !== "dismissed";
     if (filter === "Nectar pickups") return row.kind === "nectar_pickup" && row.status !== "dismissed";
@@ -37,14 +39,18 @@ export function EventLog({ match, selected, select, seek, decide, add, working }
     if (filter === "Comments") return row.kind === "note" && row.status !== "dismissed";
     return labels[row.status] === filter;
   });
+  if (filter === "Prioritized shots") rows.sort((a, b) => (b.shot_priority ?? -1) - (a.shot_priority ?? -1));
   return <section className="event-log" aria-labelledby="events-heading">
     <div className="log-header">
-      <div><h2 id="events-heading">Event log</h2><p>Jump to a call in the footage.</p></div>
+      <div><h2 id="events-heading">Event log</h2><p>{filter === "Prioritized shots"
+        ? "Ordered by ball motion. Check the release and robot in the footage."
+        : "Jump to a call in the footage."}</p></div>
       <Button size="icon-sm" variant="outline" aria-label="Add event" title="Add event" disabled={working} onClick={add}><Plus /></Button>
     </div>
     <div className="log-filter">
       <ListFilter aria-hidden="true" />
-      <select aria-label="Filter events" value={filter} onChange={e => setFilter(e.target.value as Filter)}>{filters.map(item => <option key={item}>{item}</option>)}</select>
+      <select aria-label="Filter events" value={filter} onChange={e => setFilter(e.target.value as Filter)}>{filters.filter(item =>
+        item !== "Prioritized shots" || hasShotPriorities || filter === item).map(item => <option key={item}>{item}</option>)}</select>
       <span>{rows.length} {rows.length === 1 ? "event" : "events"}</span>
     </div>
     {rows.length ? <ol className="events">{rows.map(row => <li key={row.id}>

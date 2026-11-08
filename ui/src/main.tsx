@@ -271,7 +271,7 @@ function App() {
                 <table className="team-table">
                   <caption className="sr-only">Reviewed shots and Hive entries for every marked robot</caption>
                   <thead><tr><th scope="col">Team</th><th scope="col">Pollen shot</th><th scope="col">Pollen entered</th>
-                    <th scope="col">Nectar shot</th><th scope="col">Nectar entered</th><th scope="col">Defense</th></tr></thead>
+                    <th scope="col">Nectar shot</th><th scope="col">Nectar entered</th><th scope="col" title="Share of play with an opponent visible, weighted by type of defense">Defense time</th></tr></thead>
                   <tbody>{roster.map(seed => {
                     const counts = match.team_summaries?.[seed.team]?.confirmed;
                     const defense = evidence.defense?.[seed.team];
@@ -285,7 +285,7 @@ function App() {
                       <td>{counts?.pollen.entered || "—"}</td>
                       <td>{counts?.nectar.shot || "—"}</td>
                       <td>{counts?.nectar.entered || "—"}</td>
-                      <td>{defense?.rating == null ? <span aria-label="Defense rating unavailable">—</span> : `${defense.rating}/100`}</td>
+                      <td>{defense?.rating == null ? <span aria-label="Defense time unavailable">—</span> : `${defense.rating}%`}</td>
                     </tr>;
                   })}</tbody>
                 </table>

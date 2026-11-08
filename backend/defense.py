@@ -1,16 +1,12 @@
 """Estimate sustained opponent pressure from jointly visible robot tracks."""
 
-FULL_RATING_PRESSURE_SHARE = .10
 LANE_CREDIT = .5
 
 
 def pressure_rating(pressure_seconds, observed_seconds, coverage):
     if observed_seconds < 10 or coverage < .35:
         return None
-    if pressure_seconds <= 0:
-        return 0
-    target = observed_seconds * FULL_RATING_PRESSURE_SHARE
-    return max(1, round(100 * min(1, pressure_seconds / target)))
+    return round(100 * min(1, max(0, pressure_seconds / observed_seconds)), 1)
 
 
 def defense_rating(evidence):

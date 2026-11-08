@@ -4,7 +4,8 @@ from types import SimpleNamespace
 import cv2 as cv
 import numpy as np
 
-from backend.flowers import FlowerVisit, early_flower_nectar, final_flowers, flower_detections, flower_overlap, from_top
+from backend.flowers import (FlowerVisit, early_flower_nectar, final_flowers, flower_detections, flower_overlap,
+                             from_top, merge_flower_detections)
 from backend.main import Zone
 from backend.vision import match_tracks
 
@@ -65,3 +66,10 @@ class FlowerTrackingTest(unittest.TestCase):
             cv.circle(image, (150, y), 11, (0, 223, 255), -1)
         detections = flower_detections(image, [zone])
         self.assertEqual([kind for kind, _, _ in detections], ["pollen", "pollen"])
+
+    def test_crop_model_keeps_neighboring_balls_and_suppresses_duplicates(self):
+        color = ("pollen", np.array((.50, .45, .52, .48)), .46)
+        duplicate = ("pollen", np.array((.503, .46, .519, .48)), .8)
+        neighbor = ("blue_nectar", np.array((.50, .42, .52, .45)), .8)
+        merged = merge_flower_detections([color], [duplicate, neighbor])
+        self.assertEqual([kind for kind, _, _ in merged], ["blue_nectar", "pollen"])

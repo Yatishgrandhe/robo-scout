@@ -46,7 +46,7 @@ The website build and Python runtime live under `~/Library/Application Support/P
 | Final | Pieces still scoring after play ends |
 | Penalty points | Reviewed referee calls that award points to the other alliance |
 
-Machine suggestions require review. A dash means no count has been verified. Camera cuts, small balls, overlapping volleys, and occlusion can hide a release or an entry. The defense rating combines direct pressure with lane blocks and holds where an approaching opponent slows or turns. Lane time outside direct pressure counts at half weight. The total is measured against 10% of play with an opponent visible. Use the clips to check what happened, including whether apparent lane defense was intentional.
+Machine suggestions require review. A dash means no count has been verified. Camera cuts, small balls, overlapping volleys, and occlusion can hide a release or an entry. Defense time is the percentage of jointly visible play classified as direct pressure or lane defense. Lane time outside direct pressure counts at half weight. Use the clips to check what happened, including whether apparent lane defense was intentional.
 
 Flower analysis uses projected partial overlap with the marked scoring volume. It estimates ownership from the highest visible Nectar and the bottom bonus from the lowest visible Nectar. For robot attribution, the tracker looks for a supported top entry. Early Nectar is a separate G410 candidate and can still appear in the final contents. A single camera can obscure depth and tightly stacked pieces. Review those candidates using §10.5.2, G410, and G418 in the [FIRST BIOBUZZ competition manual](https://ftc-resources.firstinspires.org/ftc/archive/2027/game/manual).
 
@@ -62,6 +62,10 @@ PYTORCH_ENABLE_MPS_FALLBACK=1 "$runtime/bin/python" -m scripts.train /absolute/p
 ```
 
 The result is `models/ftc.pt`, selectable under **Ball detector**. For a fixed-camera Hive crop dataset, use the class name `pollen` and train with `--name hive-pollen --size 320`. To use that optional checkpoint for one recording, place it at `data/matches/<recording-id>/hive-pollen.pt`.
+
+For Flowers, label tight crops of the tube and its opening with `pollen`, `red_nectar`, and `blue_nectar`. Include empty crops, stacked balls, and partially occluded pieces. Reserve whole recordings for validation. Train with `--name flower-crop --size 320 --tight-crops`. When `models/flower-crop.pt` is present, Robo Scout uses it on marked Flowers to supplement color and geometry proposals. Confirm the resulting Flower evidence from the footage.
+
+For shooting, train from confirmed and dismissed trajectories with `python -m scripts.train_shots /absolute/path/shot-labels.json`. Use the same isolated Python runtime as above. Each JSON row supplies a recording `group`, binary `label`, and `samples` as `[time, x, y]` triples with normalized coordinates. The script reports performance with each recording held out in turn. The resulting `models/shot-motion.json` enables **Prioritized shots** in the event log. Review decisions still determine the verified shot count.
 
 The repository contains the app and training tools. Footage and match-specific checkpoints stay on the Mac that produced them.
 

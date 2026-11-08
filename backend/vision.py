@@ -11,7 +11,8 @@ from scipy.optimize import linear_sum_assignment
 from .camera import CameraRegistration
 from .defense import defensive_ratings
 from .field_detection import detect_field
-from .flowers import BALL_HUES, FlowerVisit, early_flower_nectar, final_flowers, flower_at, flower_detections, observe_flower, settled_in_flower
+from .flowers import (BALL_HUES, FlowerVisit, early_flower_nectar, final_flowers, flower_at, flower_detections,
+                      merge_flower_detections, observe_flower, settled_in_flower, trained_flower_detections)
 from .robot_recovery import AppearanceRecovery
 from .rules import event
 from .track_refinement import refine_roster
@@ -512,6 +513,7 @@ def analyze(video: Path, config, progress, launch_video: Path | None = None, hiv
         extent = max(width * (field[2] - field[0]), height * (field[3] - field[1]))
         scale = min(1, 960 / extent, 1500 / max(width, height))
         shape = (round(width * scale), round(height * scale))
+        native_first = first
         first = cv.resize(first, shape)
         registration = CameraRegistration(first, config.field) if config.camera_motion else None
         progress(.02, "Segmenting the selected robot" if config.sam else "Loading the detector")
@@ -548,6 +550,13 @@ def analyze(video: Path, config, progress, launch_video: Path | None = None, hiv
             warnings.append("No scoring zones were drawn. Add events in review or rerun with calibration.")
         progress(.04, "Loading YOLO weights")
         model = YOLO(weights)
+        flower_model = None
+        flower_weights = MODELS / "flower-crop.pt"
+        if flower_weights.is_file() and any(zone.kind == "flower" for zone in config.zones):
+            try:
+                flower_model = YOLO(flower_weights)
+            except (OSError, RuntimeError, TypeError, ValueError):
+                warnings.append("Flower model unavailable. Used color and geometry tracking.")
         target_classes = {f"robot_{team.strip()}": team for team in roster}
         has_identity_model = f"robot_{config.team.strip()}" in model.names.values()
         identity_teams = [name.removeprefix("robot_") for name in model.names.values() if name.startswith("robot_")]
@@ -579,16 +588,17 @@ def analyze(video: Path, config, progress, launch_video: Path | None = None, hiv
         trackers = {}
         for index in range(start, stop + 1):
             if index == start:
+                native_frame = native_first
                 frame = first
             else:
                 if not cap.grab():
                     break
                 if (index - start) % step:
                     continue
-                ok, frame = cap.retrieve()
+                ok, native_frame = cap.retrieve()
                 if not ok:
                     break
-                frame = cv.resize(frame, shape)
+                frame = cv.resize(native_frame, shape)
             now = index / fps
             gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
             if registration is not None and len(frames) % 3 == 0:
@@ -618,13 +628,15 @@ def analyze(video: Path, config, progress, launch_video: Path | None = None, hiv
             for proposal in proposals:
                 if not any(np.linalg.norm(center(proposal[1]) - center(found[1])) < .012 for found in observed):
                     observed.append(proposal)
-            flower_observed = []
-            for proposal in flower_detections(frame, zones):
-                point = center(proposal[1])
-                distance = max(.004, .55 * (proposal[1][2] - proposal[1][0]))
-                if not any(np.linalg.norm(point - center(found[1])) < distance for found in observed + flower_observed):
-                    flower_observed.append(proposal)
-            observed = flower_observed + observed
+            flower_proposals = flower_detections(frame, zones)
+            if flower_model is not None:
+                try:
+                    flower_proposals.extend(trained_flower_detections(native_frame, zones, flower_model, device))
+                except (OSError, RuntimeError, ValueError, cv.error):
+                    flower_model = None
+                    warnings.append("Flower model stopped. Continued with color and geometry tracking.")
+            if flower_proposals:
+                observed = merge_flower_detections(observed, flower_proposals)
             boxes, prior = {}, {}
             for team, seed in roster.items():
                 if index == seeds[team]:
@@ -813,6 +825,7 @@ def analyze(video: Path, config, progress, launch_video: Path | None = None, hiv
                 "defense": defense,
                 "end_cells": end_cells,
                 "end_flowers": end_flowers,
+                "flower_model": flower_model is not None,
                 "flower_time": final_time if end_flowers else None,
                 "team_coverage": {team: round(sum(frame["robots"][team] is not None for frame in frames) / len(frames), 3)
                                   for team in roster} if multi else {},
