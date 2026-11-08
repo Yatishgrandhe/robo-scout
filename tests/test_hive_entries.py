@@ -25,6 +25,15 @@ class HiveEntriesTest(unittest.TestCase):
         self.assertIn(0, verified_candidates(launches, {"red": self.box}, {"1": "red"}))
         self.assertFalse(verified_candidates(launches, {"red": self.box}, {"1": "blue"}))
 
+    def test_short_visibility_gap_can_link_only_unambiguous_team(self):
+        ascent = [(0, .51, .50), (.08, .51, .43), (.16, .51, .36)]
+        launch = {"team": "1", "kind": "pollen", "time": 0, "samples": ascent, "flight": ascent}
+        cells = {"red": self.box}
+        observations = {"red": [(time + .5, [(x, y)]) for time, x, y in self.path]}
+        self.assertIn(0, verified_candidates([launch], cells, {"1": "red"}, observations))
+        self.assertFalse(verified_candidates([launch, {**launch, "team": "2"}], cells,
+                                              {"1": "red", "2": "red"}, observations))
+
     def test_entry_and_final_piece_use_separate_tallies(self):
         launch = event("pollen_launch", 1, "Shot", "", status="confirmed")
         entered = event("cell_entry", 2, "Entered", "", status="confirmed", piece="pollen")

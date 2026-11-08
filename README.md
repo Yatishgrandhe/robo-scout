@@ -61,6 +61,14 @@ The result is `models/ftc.pt`, selectable under **Ball detector**. For a fixed-c
 
 The repository contains the app and training tools. Footage and match-specific checkpoints stay on the Mac that produced them.
 
+## Check the app locally
+
+After setup, run the Hive-entry tests from the repository folder.
+
+```bash
+"$HOME/Library/Application Support/Pitlane/runtime/bin/python" -m unittest discover -s tests
+```
+
 ## Troubleshooting
 
 - If Terminal stops at the first space in a path, wrap the full path in double quotes.

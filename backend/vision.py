@@ -698,14 +698,13 @@ def analyze(video: Path, config, progress, launch_video: Path | None = None, hiv
                 marked = [zone.box for zone in config.zones if zone.kind == "cell" and zone.alliance == alliance]
                 if len(marked) == 1:
                     cells[alliance] = marked[0]
-        scan_hive = bool(cells and hive_weights)
         if config.scan_shots:
             from .launches import scan_launches
 
             cap.release()
             progress(.73, "Finding launches at video frame rate")
             launches = scan_launches(launch_video or video, frames, config,
-                                    lambda value, stage: progress(.73 + (.17 if scan_hive else .24) * value, stage))
+                                    lambda value, stage: progress(.73 + (.17 if cells else .24) * value, stage))
             for launch in launches:
                 kind = launch["kind"]
                 row = event(f"{kind}_launch", launch["time"], f"Possible {kind.replace('_', ' ').title()} launch",
@@ -718,15 +717,14 @@ def analyze(video: Path, config, progress, launch_video: Path | None = None, hiv
         if cells:
             from .hive_entries import scan_mouths, verified_candidates
 
-            observations = {}
-            if scan_hive:
-                progress(.91, "Following Pollen into the Hive openings")
-                try:
-                    observations = scan_mouths(launch_video or video, cells, hive_weights, frames[0]["time"],
-                                               frames[-1]["time"], device,
-                                               lambda value: progress(.91 + .07 * value, "Following Pollen into the Hive openings"))
-                except (OSError, RuntimeError, ValueError, cv.error):
-                    warnings.append("The match-specific Hive detector was unavailable. Used launch paths for entry suggestions.")
+            stage = "Following Pollen into the Hive openings"
+            progress(.91, stage)
+            try:
+                observations = scan_mouths(launch_video or video, cells, hive_weights, frames[0]["time"],
+                                           frames[-1]["time"], device, lambda value: progress(.91 + .07 * value, stage))
+            except (OSError, RuntimeError, ValueError, cv.error):
+                observations = {}
+                warnings.append("The Hive crop scan was unavailable. Used launch paths for entry suggestions.")
             alliances = {team: seed.alliance for team, seed in roster.items()} if multi else {None: config.alliance}
             for i, hit in verified_candidates(launches, cells, alliances, observations).items():
                 launch = launches[i]

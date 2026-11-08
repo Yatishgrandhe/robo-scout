@@ -15,8 +15,13 @@ export PYTHONPYCACHEPREFIX="$runtime_dir/bytecode"
 mkdir -p "$(dirname "$runtime_dir")"
 uv venv --allow-existing --python 3.12 "$runtime_dir"
 uv pip install --python "$runtime_dir/bin/python" -r requirements.txt
-npm --prefix ui ci
-npm --prefix ui run build -- --outDir "$ui_dist"
+mkdir -p "$ui_dist"
+ui_dist="$(cd "$ui_dist" && pwd)"
+(
+  cd ui
+  npm ci
+  npm run build -- --outDir "$ui_dist"
+)
 
 mkdir -p models
 fetch_weights() {

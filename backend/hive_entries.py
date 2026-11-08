@@ -13,11 +13,11 @@ class Arrival:
     path: list[tuple[float, float, float]]
 
 
-def arrival(path, box):
+def arrival(path, box, lip_fraction=.54):
     """Require a descent into the opening followed by visible deceleration."""
     x0, y0, x1, y1 = box
     width, height = x1 - x0, y1 - y0
-    lip = y0 + .54 * height
+    lip = y0 + lip_fraction * height
     for i in range(1, len(path) - 1):
         before, crossing = path[i - 1:i + 1]
         time, x, y = crossing
@@ -92,14 +92,17 @@ def associate(active, points, time, box):
     active.extend([(time, *point)] for i, point in enumerate(points) if i not in matched)
 
 
-def scan_mouths(video: Path, cells, weights: Path, start, end, device, progress=None):
+def scan_mouths(video: Path, cells, weights: Path | None, start, end, device, progress=None):
     """Detect Pollen in high-detail Cell crops, including between known launches."""
-    from ultralytics import YOLO
+    model = None
+    pollen = []
+    if weights is not None:
+        from ultralytics import YOLO
 
-    model = YOLO(weights)
-    pollen = [key for key, name in model.names.items() if name == "pollen"]
-    if not pollen:
-        raise ValueError("The Hive checkpoint needs a pollen class.")
+        model = YOLO(weights)
+        pollen = [key for key, name in model.names.items() if name == "pollen"]
+        if not pollen:
+            raise ValueError("The Hive checkpoint needs a pollen class.")
     cap = cv.VideoCapture(str(video))
     try:
         width, height, fps = (cap.get(prop) for prop in (cv.CAP_PROP_FRAME_WIDTH, cv.CAP_PROP_FRAME_HEIGHT, cv.CAP_PROP_FPS))
@@ -117,10 +120,14 @@ def scan_mouths(video: Path, cells, weights: Path, start, end, device, progress=
 
         def detect():
             images = [item[2] for item in batch]
-            predictions = model.predict(images, imgsz=320, conf=.075, classes=pollen, max_det=25, device=device, verbose=False)
-            for (team, time, image), prediction in zip(batch, predictions):
+            if model is None:
+                detections = [()] * len(images)
+            else:
+                predictions = model.predict(images, imgsz=320, conf=.075, classes=pollen, max_det=25, device=device, verbose=False)
+                detections = [prediction.boxes.data.cpu().numpy() for prediction in predictions]
+            for (team, time, image), boxes in zip(batch, detections):
                 left, top, right, bottom = crops[team]
-                centers = pollen_centers(image, prediction.boxes.data.cpu().numpy())
+                centers = pollen_centers(image, boxes)
                 points = [(float((left + x / 256 * (right - left)) / width),
                            float((top + y / 240 * (bottom - top)) / height)) for x, y in centers]
                 observations[team].append((time, points))
@@ -159,7 +166,7 @@ def find_arrivals(observations, box):
                 finished.append(track)
         active = still_active
         associate(active, points, time, box)
-    return [found for track in finished + active if (found := arrival(track, box)) is not None]
+    return [found for track in finished + active if (found := arrival(track, box) or arrival(track, box, .40)) is not None]
 
 
 def overlap_quality(mouth_path, flight):
@@ -168,6 +175,22 @@ def overlap_quality(mouth_path, flight):
     distance = np.linalg.norm(a[:, None, 1:] - b[None, :, 1:], axis=2)
     close = (gap <= .063) & (distance <= .019)
     return min(np.count_nonzero(np.any(close, axis=0)), np.count_nonzero(np.any(close, axis=1)))
+
+
+def projected_quality(launch, hit, box):
+    """Bridge a short gap when the Cell frame hides the middle of a flight."""
+    ascent = launch["samples"]
+    if len(ascent) < 3:
+        return 0.
+    start, last = ascent[0], ascent[-1]
+    gap = hit.time - last[0]
+    if not .03 <= gap <= .84 or last[2] > box[3] + .19:
+        return 0.
+    x = next(point[1] for point in hit.path if point[0] == hit.time)
+    velocity = (last[1] - start[1]) / max(.03, last[0] - start[0])
+    projected = last[1] + velocity * min(gap, .27)
+    error = abs(projected - x)
+    return 1 - error / .038 if error < .038 else 0.
 
 
 def verified_candidates(launches, cells, alliances, observations=None):
@@ -179,20 +202,24 @@ def verified_candidates(launches, cells, alliances, observations=None):
             found = arrival(launch["flight"], cells[alliance])
             if found is not None:
                 direct[i] = found
+    matched = set(direct)
     matches = {}
     for alliance, rows in (observations or {}).items():
-        for found in find_arrivals(rows, cells[alliance]):
-            quality = []
+        for found in sorted(find_arrivals(rows, cells[alliance]), key=lambda hit: hit.time):
+            exact, projected = [], []
             for i, launch in enumerate(launches):
-                if (launch["kind"] != "pollen" or alliances.get(launch.get("team")) != alliance
+                if (i in matched or launch["kind"] != "pollen" or alliances.get(launch.get("team")) != alliance
                         or not .18 <= found.time - launch["time"] <= 1.55):
                     continue
                 score = overlap_quality(found.path, launch["flight"])
                 if score >= 2:
-                    quality.append((score, i))
-            quality.sort(reverse=True)
-            if quality and (len(quality) == 1 or quality[0][0] > quality[1][0] + 1):
-                score, index = quality[0]
-                if index not in matches or score > matches[index][0]:
-                    matches[index] = (score, found)
-    return {**direct, **{index: found for index, (_, found) in matches.items()}}
+                    exact.append((score, i))
+                elif (confidence := projected_quality(launch, found, cells[alliance])) > .25:
+                    projected.append((confidence, i))
+            hits = sorted(exact or projected, reverse=True)
+            teams = {launches[index].get("team") for _, index in hits}
+            if hits and (len(teams) == 1 or exact and hits[0][0] > hits[1][0] + 1):
+                _, index = hits[0]
+                matches[index] = found
+                matched.add(index)
+    return {**direct, **matches}
