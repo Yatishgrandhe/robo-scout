@@ -225,6 +225,40 @@ def report(match):
             "manual": MANUAL, "ruleset": "BIOBUZZ TU08"}
 
 
+def review_roster(meta):
+    config = meta.get("config") or {}
+    return {seed["team"]: seed.get("alliance")
+            for seed in [config, *config.get("robots", [])] if seed.get("team")}
+
+
+def saved_review(digests, current=None):
+    if not digests:
+        return None
+    requested_teams = review_roster(current) if current else {}
+    best_match, best_rank = None, (0, 0)
+    for path in sorted(MATCHES.glob("*/meta.json")):
+        if current and path.parent.name == current["id"]:
+            continue
+        try:
+            meta = read(path)
+            if (meta["state"] != "complete" or meta.get("media_id")
+                    or not digests.intersection(meta.get("video_digests", ()))):
+                continue
+            roster = review_roster(meta)
+            if not requested_teams.items() <= roster.items():
+                continue
+            verified = [row for row in rows_for(meta["id"]) if row["status"] == "confirmed"
+                        and (row["kind"] in PIECE_EVENTS or row["kind"] in SHOT_EVENTS)]
+        except (OSError, ValueError):
+            continue
+        primary = (meta.get("config") or {}).get("team", "")
+        verified_teams = {row.get("team", primary) for row in verified} & roster.keys()
+        rank = (len(verified_teams), len(verified))
+        if rank > best_rank:
+            best_match, best_rank = meta["id"], rank
+    return best_match
+
+
 def media_folder(meta):
     return folder_for(meta.get("media_id", meta["id"]))
 
@@ -287,8 +321,15 @@ def rename_folder(folder_id: str, data: FolderName):
 
 
 @app.get("/api/matches/{match}")
-def get_match(match: str):
-    return report(match)
+def get_match(match: str, prefer_reviewed: bool = False):
+    current = report(match)
+    if (prefer_reviewed and not current.get("media_id") and current["state"] != "processing"
+            and all(row["status"] == "suggested" for row in current["events"])):
+        reviewed = saved_review(set(current.get("video_digests", ())), current)
+        if reviewed:
+            return {**report(reviewed), "reused_review": True,
+                    "opened_team": (current.get("config") or {}).get("team") or None}
+    return current
 
 
 @app.patch("/api/matches/{match}")
@@ -401,6 +442,12 @@ def upload(video: UploadFile = File(...)):
                     raise HTTPException(413, "Choose a video under 2 GB.")
                 digest.update(chunk)
                 out.write(chunk)
+        source_digest = digest.hexdigest()
+        reviewed = saved_review({source_digest})
+        if reviewed:
+            existing = report(reviewed)
+            shutil.rmtree(folder)
+            return {**existing, "reused_review": True}
         probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0",
                                 "-show_entries", "format=duration:stream=width,height,avg_frame_rate", "-of", "json", str(source)],
                                capture_output=True, text=True, timeout=20)
@@ -429,7 +476,6 @@ def upload(video: UploadFile = File(...)):
         dimensions = json.loads(normalized_info.stdout)
         width, height = (dimensions["streams"][0][k] for k in ("width", "height"))
         duration = float(dimensions["format"]["duration"])
-        source_digest = digest.hexdigest()
         with normalized.open("rb") as playback:
             playback_digest = file_digest(playback, "sha256").hexdigest()
         write(folder / "meta.json", {"id": match, "name": Path(video.filename or "Match video").stem[:180],

@@ -18,6 +18,7 @@ const initial: Setup = { team: "", alliance: "red", robot: null, seed_time: 0, s
 const emptyEvidence: TeamEvidence = { frames: [], warnings: [], coverage: null, segmentation: false };
 const initialOptions: Options = { models: { generic: true, synthetic: false, ftc: false }, sam: true };
 const matchUrl = (id: string) => `/api/matches/${id}`;
+const openMatchUrl = (id: string) => `${matchUrl(id)}?prefer_reviewed=true`;
 function App() {
   const [match, setMatch] = useState<Match>();
   const [evidence, setEvidence] = useState(emptyEvidence);
@@ -46,7 +47,7 @@ function App() {
     setEditing(next.state === "setup" || next.state === "error");
     setDrawing(null);
     setTime(0);
-    setSelectedTeam(undefined);
+    setSelectedTeam(next.opened_team ?? undefined);
     setSelectedId(next.demo ? next.events.find(row => isReviewEvent(row.kind))?.id : undefined);
     localStorage.setItem("pitlane-match", next.id);
     const url = new URL(window.location.href);
@@ -58,7 +59,7 @@ function App() {
   useEffect(() => {
     const requested = new URLSearchParams(window.location.search).get("match");
     const id = requested ?? localStorage.getItem("pitlane-match") ?? "demo";
-    void api<Match>(matchUrl(id)).catch(() => api<Match>(matchUrl("demo"))).then(activate).catch(e => setError(e.message));
+    void api<Match>(openMatchUrl(id)).catch(() => api<Match>(matchUrl("demo"))).then(activate).catch(e => setError(e.message));
     void api<Options>("/api/options").then(setOptions).catch(() => {});
   }, [activate]);
 
@@ -222,6 +223,7 @@ function App() {
     <main className="desk">
       {error && <p className="banner error-copy" role="alert">{error}<Button variant="ghost" size="sm" onClick={() => setError("")}>Dismiss</Button></p>}
       {busy && <p className="banner" role="status">{busy}… {busy === "Preparing video" && "Large recordings can take a moment."}</p>}
+      {match?.reused_review && !busy && <p className="banner" role="status">Opened the saved review for this recording.</p>}
       {!match || !viewedMatch ? <div className="initial-state"><Film /><h1>{error ? "Match unavailable" : "Opening the film desk…"}</h1>{error && <p>Import a recording to start a review.</p>}</div> : <>
         <div className="match-head">
           <div>
@@ -233,7 +235,7 @@ function App() {
           </div>
           <div className="match-actions">
             {!match.demo && <Button variant="outline" disabled={working} onClick={openCalibration}><SlidersHorizontal data-icon="inline-start" /> Calibrate & analyze</Button>}
-            {!match.demo && !roster.length && <Button variant="outline" disabled={working} onClick={() =>
+            {!match.demo && <Button variant="outline" disabled={working} onClick={() =>
               void task("Creating robot review", async () => activate(await api<Match>(`${matchUrl(match.id)}/robot-reviews`, { method: "POST" })))}>
               <UserRoundPlus data-icon="inline-start" /> Review another robot
             </Button>}
@@ -250,7 +252,7 @@ function App() {
           <div className="video-column">
             {activeTeam && <section className="ledger team-overview" aria-labelledby="team-overview-heading">
               <div className="ledger-heading"><div><h2 id="team-overview-heading">Team review</h2>
-                <p>Reviewed shots and successful Hive entries. Pieces spilled by a later tip still count as entries. Select a team for its events.</p></div></div>
+                <p>Verified minimums from footage. Hive entries include pieces spilled by a later tip. Select a team for its events.</p></div></div>
               <div className="team-table-scroll">
                 <table className="team-table">
                   <caption className="sr-only">Reviewed shots and Hive entries for every marked robot</caption>
@@ -328,7 +330,7 @@ function App() {
         <MatchLibrary activeId={match?.id} trigger={libraryButton} close={() => {
           setLibrary(false);
           requestAnimationFrame(() => libraryButton.current?.focus());
-        }} openMatch={async id => activate(await api<Match>(matchUrl(id)))}
+        }} openMatch={async id => activate(await api<Match>(openMatchUrl(id)))}
           updateMatch={item => setMatch(previous => previous?.id === item.id
             ? { ...previous, name: item.name, folder_id: item.folder_id } : previous)} />
       </Suspense>}

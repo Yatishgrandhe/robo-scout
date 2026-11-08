@@ -52,6 +52,8 @@ export type MatchMeta = {
 };
 export type Match = MatchMeta & {
   ruleset: string; manual: string; events: EventRow[];
+  reused_review?: boolean;
+  opened_team?: string | null;
   field_preset?: Pick<Setup, "zones" | "start_time" | "end_time" | "field" | "camera_motion">;
   open_attribution?: ("balls" | "tips")[];
   summary: { confirmed: ReviewCounts; suggested: ReviewCounts; pending: number };
