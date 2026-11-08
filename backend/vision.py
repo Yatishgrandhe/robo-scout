@@ -487,7 +487,7 @@ def analyze(video: Path, config, progress, launch_video: Path | None = None, hiv
                 zones = (manual_zones + detected)[:32]
                 config = config.model_copy(update={"zones": zones, "end_time": end_time})
                 effective = {"zones": [zone.model_dump() for zone in zones], "end_time": end_time}
-                warnings.append("Pitlane detected visible Hive Cell zones. Review the boundaries and mark any visible Flowers or Gardens you want to score.")
+                warnings.append("Robo Scout detected visible Hive Cell zones. Review the boundaries and mark any visible Flowers or Gardens you want to score.")
         roster = {seed.team: seed for seed in (config, *config.robots)}
         multi = bool(config.robots)
         nano_params = None
@@ -741,10 +741,10 @@ def analyze(video: Path, config, progress, launch_video: Path | None = None, hiv
             for track in tracks:
                 if final_time - track.samples[-1][0] > max(.28, 1.5 / config.sample_fps):
                     continue
-                cells = [(zi, entered) for zi, entered in track.arrivals.items()
-                         if config.zones[zi].kind == "cell" and final_time - entered >= .4]
-                if cells:
-                    cell = config.zones[min(cells, key=lambda hit: hit[1])[0]].alliance
+                cell_hits = [(zi, entered) for zi, entered in track.arrivals.items()
+                             if config.zones[zi].kind == "cell" and final_time - entered >= .4]
+                if cell_hits:
+                    cell = config.zones[min(cell_hits, key=lambda hit: hit[1])[0]].alliance
                     visible = end_cells.setdefault(cell, {"pollen": 0, "nectar": 0})
                     visible["pollen" if track.kind == "pollen" else "nectar"] += 1
                 if track.release is None and not (multi and launches):
