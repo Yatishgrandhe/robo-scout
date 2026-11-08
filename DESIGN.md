@@ -12,7 +12,7 @@ The desk feels like a dark film room for Robo Knights. A bright knight mark anch
 
 ## 2. Color
 
-Graphite #111016, panel #1b1820, ink #f7eff4, muted ink #bdb0bd, border #3c3441, brand pink #ff5c91, dark pink selection #3b2030, and near-black film #0c0a0f. Amber #f3cb69 marks the playhead and the selected box. Coral #ff9a94 marks fouls and review warnings. Red #fa7187 and blue #78baff identify the alliances beside written team numbers.
+Graphite #111016, panel #1b1820, ink #f7eff4, muted ink #bdb0bd, border #3c3441, brand pink #ff5c91, dark pink selection #3b2030, and near-black film #0c0a0f. Pink marks playback and the active scrubber. Amber #f3cb69 marks calibration, single-robot tracks, and Hive entries. Coral #ff9a94 marks fouls and review warnings. Red #fa7187 and blue #78baff identify the alliances beside written team numbers.
 
 ## 3. Typography
 
@@ -25,6 +25,8 @@ Four-pixel spacing basis. Main content maxes out at 1400 px, with 24 px between 
 ## 5. Primitives
 
 shadcn Button, Badge, Dialog, Field, Input, Progress, and Empty share the graphite and pink theme. Buttons show active, hover, focus, disabled, and waiting states. Event rows carry time, title, and review status. The player pairs a video with a seek slider, event marks, frame overlays, and transport controls. The review panel exposes rule, evidence, and explicit confirm and dismiss actions.
+
+The player header carries the Robo Knights crest, a compact footage label, and source and resolution metadata. A pink rim and a muted pink wash frame the header. The transport uses a pink play button and scrubber, with distinct markers for comments, Hive entries, and fouls. Keep the crest and the transport outside the recorded picture.
 
 The robot ledger puts Pollen and Nectar in rows, with shots, successful Hive entries, and final pieces in separate columns. Penalty points and Nectar pickup checks sit below the table. Unavailable counts use a dash, and suggestions stay separate from confirmed counts. Selecting a launch trajectory shows its path over the footage. Portrait footage is centered and height-limited so the transport and launch controls remain reachable.
 For a match roster, team controls use written team numbers and alliance colors. Selecting a team changes its event log and robot stats while all marked tracks stay on the video. The defense estimate shows the visible time behind each rating and offers jumps to candidate pressure intervals.

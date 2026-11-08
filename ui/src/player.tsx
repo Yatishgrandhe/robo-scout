@@ -67,7 +67,9 @@ export function Player({ match, frames, time, setTime, video, jump, select, setu
   function toggle() {
     const el = video.current;
     if (!el) return;
-    if (el.paused) void el.play().catch(() => setMediaError(true));
+    if (el.paused) void el.play().catch(error => {
+      if (error.name !== "AbortError") setMediaError(true);
+    });
     else el.pause();
   }
 
@@ -96,8 +98,14 @@ export function Player({ match, frames, time, setTime, video, jump, select, setu
 
   return <section className="player" aria-label="Match footage">
     <div className="player-header">
-      <div><span className="rec-dot" /> MATCH FOOTAGE <span className="player-separator">/</span> {match.demo ? "PRACTICE SIMULATION" : "LOCAL VIDEO"}</div>
-      <span>{match.width} × {match.height}</span>
+      <div className="player-brand">
+        <img src="/robo-knights.png" width="96" height="121" alt="" />
+        <div><span>Robo Knights</span><strong>Match footage</strong></div>
+      </div>
+      <div className="player-meta">
+        <span className="player-source">{match.demo ? "Practice simulation" : "Local video"}</span>
+        <span>{match.width} × {match.height}</span>
+      </div>
     </div>
     <div ref={stage} className="stage" data-drawing={!!drawing} data-portrait={match.height > match.width}
       style={{ aspectRatio: match.width / match.height, "--portrait-width": `${72 * match.width / match.height}vh` } as CSSProperties}
@@ -106,6 +114,7 @@ export function Player({ match, frames, time, setTime, video, jump, select, setu
         aria-label="Match recording" onPlay={() => setPlaying(true)} onPause={e => {
           setPlaying(false); setTime(e.currentTarget.currentTime);
         }}
+        onPlaying={() => setMediaError(false)}
         onEnded={e => { setPlaying(false); setTime(e.currentTarget.currentTime); }}
         onSeeked={e => setTime(e.currentTarget.currentTime)}
         onError={() => setMediaError(true)} />
@@ -124,7 +133,8 @@ export function Player({ match, frames, time, setTime, video, jump, select, setu
       {overlay && robots.map((seed, index) => seed.box && <span key={`${seed.team}-${index}`}
         className={`track-label ${roster.length > 1 ? `track-${seed.alliance}` : ""}`}
         style={{ left: `${Math.min(seed.box[0] * 100, 76)}%`, top: `${Math.max(1, seed.box[1] * 100 - 5)}%` }}>
-        <Crosshair /> {match.demo ? "ROBOT 408" : seed.team ? `TEAM ${seed.team}` : "TARGET ROBOT"}
+        <Crosshair /> {match.demo ? "ROBOT 408" : seed.team
+          ? <span><span className="track-team-prefix">TEAM </span>{seed.team}</span> : "TARGET ROBOT"}
       </span>)}
       {drawing && <span className="draw-tip">{anchor ? "Click the opposite corner" : "Click the first corner"}</span>}
       {mediaError && <span className="draw-tip" role="alert">Playback failed. Try importing the video again.</span>}
