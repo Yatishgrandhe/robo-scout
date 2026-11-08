@@ -19,7 +19,7 @@ export type Status = "confirmed" | "suggested" | "dismissed";
 export const kinds = {
   cell_entry: "Piece entered Hive Cell",
   cell_ball: "Piece scored in Cell", garden_ball: "Piece scored in Garden", flower_ball: "Piece scored in Flower",
-  nectar_pickup: "Nectar pickup", penalty: "Penalty", note: "Note",
+  nectar_pickup: "Nectar pickup", penalty: "Penalty", note: "Scouting comment",
   pollen_launch: "Pollen launch", red_nectar_launch: "Red Nectar launch", blue_nectar_launch: "Blue Nectar launch",
   nectar_launch: "Nectar launch (color unclear)",
 };

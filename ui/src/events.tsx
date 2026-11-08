@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { Check, Circle, Flag, ListFilter, Plus, RotateCcw, ScanLine } from "lucide-react";
+import { Check, Circle, Flag, ListFilter, MessageSquare, Plus, RotateCcw, ScanLine } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -10,11 +10,12 @@ import { Input } from "@/components/ui/input";
 import { eventTitle, isPieceOutcome, isReviewEvent, isScoredPiece, kinds, labels, pieceNames, timecode } from "@/types";
 import type { EventRow, Kind, Match, Piece, ReviewKind, Status } from "@/types";
 
-const filters = ["All events", "Launches", "Hive entries", "Retained pieces", "Nectar pickups", "Penalties", "Needs review", "Reviewed", "Dismissed"] as const;
+const filters = ["All events", "Launches", "Hive entries", "Retained pieces", "Nectar pickups", "Penalties", "Comments", "Needs review", "Reviewed", "Dismissed"] as const;
 type Filter = typeof filters[number];
 
 function EventIcon({ kind }: { kind: Kind }) {
   if (kind === "penalty") return <Flag />;
+  if (kind === "note") return <MessageSquare />;
   if (isPieceOutcome(kind) || kind.endsWith("_launch") || kind === "nectar_pickup") return <Circle />;
   return <ScanLine />;
 }
@@ -33,12 +34,13 @@ export function EventLog({ match, selected, select, seek, decide, add, working }
     if (filter === "Retained pieces") return isScoredPiece(row.kind) && row.status !== "dismissed";
     if (filter === "Nectar pickups") return row.kind === "nectar_pickup" && row.status !== "dismissed";
     if (filter === "Penalties") return row.kind === "penalty" && row.status !== "dismissed";
+    if (filter === "Comments") return row.kind === "note" && row.status !== "dismissed";
     return labels[row.status] === filter;
   });
   return <section className="event-log" aria-labelledby="events-heading">
     <div className="log-header">
       <div><h2 id="events-heading">Event log</h2><p>Jump to a call in the footage.</p></div>
-      <Button size="icon-sm" variant="outline" aria-label="Add event" title="Add event" onClick={add}><Plus /></Button>
+      <Button size="icon-sm" variant="outline" aria-label="Add event" title="Add event" disabled={working} onClick={add}><Plus /></Button>
     </div>
     <div className="log-filter">
       <ListFilter aria-hidden="true" />
@@ -90,15 +92,17 @@ export function EventLog({ match, selected, select, seek, decide, add, working }
   </section>;
 }
 
-export function EventDialog({ open, close, time, events, save }: {
-  open: boolean; close: () => void; time: number; events: EventRow[]; save: (data: unknown) => Promise<void>;
+export function EventDialog({ open, close, time, initialKind, team, events, save }: {
+  open: boolean; close: () => void; time: number; initialKind: ReviewKind; team?: string;
+  events: EventRow[]; save: (data: unknown) => Promise<void>;
 }) {
-  const [kind, setKind] = useState<ReviewKind>("pollen_launch");
+  const [kind, setKind] = useState<ReviewKind>(initialKind);
   const [piece, setPiece] = useState<Piece | "">("");
   const [severity, setSeverity] = useState("minor");
   const [card, setCard] = useState("");
   const [busy, setBusy] = useState(false);
   const [issue, setIssue] = useState("");
+  const comment = kind === "note";
   const outcome = isPieceOutcome(kind);
   const needsPiece = outcome || kind === "nectar_pickup";
   const remaining = new Map<string, number>();
@@ -111,11 +115,16 @@ export function EventDialog({ open, close, time, events, save }: {
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const fields = new FormData(e.currentTarget);
+    const evidence = String(fields.get("evidence") ?? "").trim();
+    if (comment && !evidence) {
+      setIssue("Write a comment before saving.");
+      return;
+    }
     setBusy(true);
     setIssue("");
     try {
       await save({ kind, title: String(fields.get("title")).trim() || kinds[kind], time,
-        rule: fields.get("rule"), count: Number(fields.get("count")), evidence: fields.get("evidence"),
+        rule: comment ? "" : fields.get("rule"), count: comment ? 1 : Number(fields.get("count")), evidence,
         piece: needsPiece ? fields.get("piece") : null,
         launch_id: outcome ? fields.get("launch_id") || null : null,
         severity: kind === "penalty" ? severity : null, card: kind === "penalty" && card ? card : null });
@@ -126,13 +135,15 @@ export function EventDialog({ open, close, time, events, save }: {
   }
   return <Dialog open={open} onOpenChange={value => !value && !busy && close()}>
     <DialogContent>
-      <DialogHeader><DialogTitle>Log an event</DialogTitle><DialogDescription>Add a reviewed call at {timecode(time, true)}.</DialogDescription></DialogHeader>
+      <DialogHeader><DialogTitle>{comment ? "Add a scouting comment" : "Log an event"}</DialogTitle>
+        <DialogDescription>{comment ? `Save a comment${team ? ` for Team ${team}` : ""} at ${timecode(time, true)}.`
+          : `Add a reviewed call at ${timecode(time, true)}.`}</DialogDescription></DialogHeader>
       <form onSubmit={submit}>
         <FieldGroup className="event-form">
-          <Field><FieldLabel htmlFor="kind">Event type</FieldLabel><select id="kind" value={kind} onChange={e => {
+          {initialKind !== "note" && <Field><FieldLabel htmlFor="kind">Event type</FieldLabel><select id="kind" value={kind} onChange={e => {
             setKind(e.target.value as ReviewKind);
             setPiece("");
-          }}>{Object.entries(kinds).map(([key, value]) => <option key={key} value={key}>{value}</option>)}</select></Field>
+          }}>{Object.entries(kinds).map(([key, value]) => <option key={key} value={key}>{value}</option>)}</select></Field>}
           {needsPiece && <Field key={kind}><FieldLabel htmlFor="piece">Piece type</FieldLabel>
             <select id="piece" name="piece" value={piece} onChange={e => setPiece(e.target.value as Piece)} required>
               <option value="" disabled>Choose piece type</option>
@@ -148,19 +159,24 @@ export function EventDialog({ open, close, time, events, save }: {
               </option>)}
             </select>
           </Field>}
-          <Field><FieldLabel htmlFor="event-title">Title</FieldLabel><Input id="event-title" name="title" placeholder={kinds[kind]} maxLength={120} /></Field>
-          <div className="event-form-pair">
+          <Field><FieldLabel htmlFor="event-title">{comment ? "Title (optional)" : "Title"}</FieldLabel>
+            <Input id="event-title" name="title" placeholder={kinds[kind]} maxLength={120} /></Field>
+          {!comment && <div className="event-form-pair">
             <Field><FieldLabel htmlFor="rule">Rule or section</FieldLabel><Input id="rule" name="rule" placeholder="e.g. G410" maxLength={32} /></Field>
             <Field><FieldLabel htmlFor="count">Count</FieldLabel><Input id="count" type="number" name="count" min={1} max={60} defaultValue={1} required /></Field>
-          </div>
+          </div>}
           {kind === "penalty" && <div className="event-form-pair">
             <Field><FieldLabel htmlFor="severity">Severity</FieldLabel><select id="severity" value={severity} onChange={e => setSeverity(e.target.value)}><option value="warning">Warning</option><option value="minor">Minor foul</option><option value="major">Major foul</option></select></Field>
             <Field><FieldLabel htmlFor="card">Card</FieldLabel><select id="card" value={card} onChange={e => setCard(e.target.value)}><option value="">None</option><option value="yellow">Yellow</option><option value="red">Red</option></select></Field>
           </div>}
-          <Field><FieldLabel htmlFor="evidence">Evidence note</FieldLabel><Input id="evidence" name="evidence" maxLength={400} /></Field>
+          <Field key={comment ? "comment" : "evidence"}><FieldLabel htmlFor="evidence">{comment ? "Comment" : "Evidence note"}</FieldLabel>
+            {comment ? <textarea id="evidence" name="evidence" rows={4} maxLength={400} required
+              placeholder="What did the robot do well? What would you watch next?" />
+              : <Input id="evidence" name="evidence" maxLength={400} />}</Field>
         </FieldGroup>
         {issue && <p className="error-copy" role="alert">{issue}</p>}
-        <DialogFooter className="event-form-footer"><Button variant="outline" type="button" onClick={close} disabled={busy}>Cancel</Button><Button type="submit" disabled={busy}>Save event</Button></DialogFooter>
+        <DialogFooter className="event-form-footer"><Button variant="outline" type="button" onClick={close} disabled={busy}>Cancel</Button>
+          <Button type="submit" disabled={busy}>{comment ? "Save comment" : "Save event"}</Button></DialogFooter>
       </form>
     </DialogContent>
   </Dialog>;

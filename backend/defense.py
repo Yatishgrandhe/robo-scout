@@ -1,8 +1,18 @@
 """Estimate sustained opponent pressure from jointly visible robot tracks."""
-import numpy as np
+
+FULL_RATING_PRESSURE_SHARE = .10
+
+
+def pressure_rating(pressure_seconds, observed_seconds, coverage):
+    if pressure_seconds <= 0 or observed_seconds < 10 or coverage < .35:
+        return None
+    target = observed_seconds * FULL_RATING_PRESSURE_SHARE
+    return max(1, round(100 * min(1, pressure_seconds / target)))
 
 
 def defensive_ratings(frames, roster, shape, transforms, start_time):
+    import numpy as np
+
     if len(roster) < 2 or len(frames) < 3:
         return {}
     times = np.array([frame["time"] for frame in frames])
@@ -59,9 +69,10 @@ def defensive_ratings(frames, roster, shape, transforms, start_time):
                      "opponent": str(peers[a])}
                     for a, b in zip(edges[::2], edges[1::2]) if b - a >= hold]
         observed = float(visible.sum()) * dt
-        fraction = observed / max(dt, float(live.sum()) * dt)
-        seconds = sum(item["end"] - item["start"] for item in episodes)
-        results[team] = {"rating": round(min(100, 100 * seconds / observed)) if observed >= 10 and fraction >= .35 else None,
-                         "pressure_seconds": round(seconds, 1), "observed_seconds": round(observed, 1),
-                         "coverage": round(fraction, 3), "episodes": episodes}
+        coverage = round(observed / max(dt, float(live.sum()) * dt), 3)
+        seconds = round(sum(item["end"] - item["start"] for item in episodes), 1)
+        observed = round(observed, 1)
+        results[team] = {"rating": pressure_rating(seconds, observed, coverage),
+                         "pressure_seconds": seconds, "observed_seconds": observed,
+                         "coverage": coverage, "episodes": episodes}
     return results

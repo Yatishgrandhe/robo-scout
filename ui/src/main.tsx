@@ -8,7 +8,7 @@ import { Calibration } from "@/calibration";
 import { EventDialog, EventLog } from "@/events";
 import { isAnchorMark, isTeamMark, Player } from "@/player";
 import type { Mark } from "@/player";
-import { RobotStats } from "@/robot-stats";
+import { DefenseReview, RobotStats } from "@/robot-stats";
 import { api, isReviewEvent, json, timecode } from "@/types";
 import type { Alliance, Box, EventRow, Match, Options, Piece, Setup, Status, TeamEvidence } from "@/types";
 import "./index.css";
@@ -30,7 +30,7 @@ function App() {
   const [zoneAlliance, setZoneAlliance] = useState<Alliance>("red");
   const [selectedId, setSelectedId] = useState<string>();
   const [selectedTeam, setSelectedTeam] = useState<string>();
-  const [eventTime, setEventTime] = useState<number | null>(null);
+  const [eventDraft, setEventDraft] = useState<{ time: number; comment: boolean }>();
   const [library, setLibrary] = useState(false);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -187,6 +187,17 @@ function App() {
     requestAnimationFrame(() => document.getElementById("analysis-setup")?.scrollIntoView({ block: "start" }));
   }
 
+  function openEvent(comment = false) {
+    video.current?.pause();
+    setEventDraft({ time: video.current?.currentTime ?? time, comment });
+  }
+
+  function watchFootage(point: number) {
+    video.current?.pause();
+    jump(point);
+    footage.current?.scrollIntoView({ block: "nearest" });
+  }
+
   const working = Boolean(busy) || match?.state === "processing";
   const config = match?.config;
   const roster = config?.robots?.length ? [config, ...config.robots] : [];
@@ -271,17 +282,13 @@ function App() {
                       <td>{counts?.pollen.entered || "—"}</td>
                       <td>{counts?.nectar.shot || "—"}</td>
                       <td>{counts?.nectar.entered || "—"}</td>
-                      <td>{defense?.rating == null ? "—" : `${defense.rating}/100`}</td>
+                      <td>{defense?.rating == null ? <span aria-label="Defense rating unavailable">—</span> : `${defense.rating}/100`}</td>
                     </tr>;
                   })}</tbody>
                 </table>
               </div>
-              {evidence.defense?.[activeTeam.team] && <div className="defense-detail">
-                <p>{evidence.defense[activeTeam.team].pressure_seconds}s of pressure over {evidence.defense[activeTeam.team].observed_seconds}s with an opponent visible. Estimate from tracking.</p>
-                {evidence.defense[activeTeam.team].episodes.map(episode => <Button key={episode.start} variant="ghost" size="sm" onClick={() => {
-                  video.current?.pause(); jump(episode.start); footage.current?.scrollIntoView({ block: "nearest" });
-                }}>{timecode(episode.start)} · vs. {episode.opponent}</Button>)}
-              </div>}
+              <DefenseReview team={activeTeam.team} defense={evidence.defense?.[activeTeam.team]}
+                addComment={() => openEvent(true)} seek={watchFootage} saving={!!busy} />
             </section>}
             {match.official_cells ? <div className="cell-evidence">
               <strong>Official final Cell count</strong>
@@ -306,9 +313,7 @@ function App() {
             </p>}
           </div>
           <EventLog key={`${match.id}-${activeTeam?.team ?? ""}`} match={viewedMatch} selected={selected} select={select} decide={decide}
-            seek={point => { video.current?.pause(); jump(point); footage.current?.scrollIntoView({ block: "nearest" }); }} add={() => {
-            video.current?.pause(); setEventTime(video.current?.currentTime ?? time);
-          }} working={!!busy} />
+            seek={watchFootage} add={() => openEvent()} working={!!busy} />
         </div>
         {editing && <Calibration setup={setup} setSetup={setSetup} match={match} time={time} options={options} drawing={drawing} arm={arm} zoneAlliance={zoneAlliance}
           setZoneAlliance={setZoneAlliance} mark={mark} run={run} working={working} hide={() => { setEditing(false); setDrawing(null); }} />}
@@ -319,7 +324,9 @@ function App() {
             <span><CircleDot /> {Math.round(evidence.coverage * 100)}% robot tracking coverage · {evidence.segmentation ? "SAM outline applied" : "Box tracking"}{evidence.device ? ` · ${evidence.device.toUpperCase()}` : ""}{match.config?.model === "synthetic" ? " · Synthetic weights" : ""}</span> : <span><CircleDot /> Runs on this Mac</span>}
           <a href={match.manual} target="_blank" rel="noreferrer">BIOBUZZ rulebook <ArrowUpRight /></a>
         </footer>
-        {eventTime !== null && <EventDialog open close={() => setEventTime(null)} time={eventTime} events={viewedMatch.events} save={async data => {
+        {eventDraft && <EventDialog open close={() => setEventDraft(undefined)} time={eventDraft.time}
+          initialKind={eventDraft.comment ? "note" : "pollen_launch"} team={viewedMatch.config?.team}
+          events={viewedMatch.events} save={async data => {
           const next = await api<Match>(`${matchUrl(match.id)}/events`, json("POST", {
             ...(data as object), ...(activeTeam ? { team: activeTeam.team } : {}),
           }));

@@ -23,6 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from .defense import pressure_rating
 from .rules import BALL_EVENTS, EVENT_KINDS, FOUL_POINTS, MANUAL, NECTAR_COLORS, PIECE_EVENTS, SHOT_EVENTS, event, event_piece, penalty_points, summarize
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -392,6 +393,9 @@ def frames(match: str):
     if not path.is_file():
         return {"frames": [], "warnings": [], "coverage": None, "segmentation": False}
     result = read(path)
+    # Apply the current scale to saved evidence without rerunning tracking.
+    for defense in result.get("defense", {}).values():
+        defense["rating"] = pressure_rating(defense["pressure_seconds"], defense["observed_seconds"], defense["coverage"])
     return {key: value for key, value in result.items() if key != "events"}
 
 

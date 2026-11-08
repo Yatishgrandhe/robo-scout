@@ -1,8 +1,32 @@
-import { Flag } from "lucide-react";
+import { Flag, MessageSquarePlus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { scoringSetupIssues } from "@/types";
-import type { Evidence, Match } from "@/types";
+import { scoringSetupIssues, timecode } from "@/types";
+import type { Defense, Evidence, Match } from "@/types";
+
+export function DefenseReview({ team, defense, seek, addComment, saving }: {
+  team: string; defense?: Defense; seek: (time: number) => void; addComment: () => void; saving: boolean;
+}) {
+  const clips = defense?.episodes.length ?? 0;
+  return <section className="defense-detail" aria-labelledby="defense-heading">
+    <div className="defense-heading">
+      <h3 id="defense-heading">Defense review <span>· Team {team}</span></h3>
+      <Button variant="outline" size="sm" disabled={saving} onClick={addComment}><MessageSquarePlus data-icon="inline-start" /> Add comment</Button>
+    </div>
+    {defense ? <>
+      <p><strong>Auto scouting comment</strong> {clips > 0
+        ? `Tracking found ${clips === 1 ? "one moment" : `${clips} moments`} of pressure. Watch how the robot closes space and whether it holds the lane.`
+        : "Tracking found no clear pressure in this footage. Off-ball positioning and lane coverage are worth a closer look."}</p>
+      <p>{defense.pressure_seconds}s of tracked pressure over {defense.observed_seconds}s with an opponent visible. {defense.rating == null
+        ? "A rating needs visible pressure and enough shared tracking."
+        : "Full credit starts at 10% of visible play."}</p>
+      {clips > 0 && <div className="defense-clips">{defense.episodes.map(episode =>
+        <Button key={episode.start} variant="ghost" size="sm" onClick={() => seek(episode.start)}>
+          {timecode(episode.start)} · vs. {episode.opponent}
+        </Button>)}</div>}
+    </> : <p>Defense observations appear after tracking opposing robots together.</p>}
+  </section>;
+}
 
 function Count({ verified, suggested, checked, showZero = false }: {
   verified: number; suggested: number; checked: boolean; showZero?: boolean;
