@@ -1,12 +1,16 @@
 """Estimate sustained opponent pressure from jointly visible robot tracks."""
 
-LANE_CREDIT = .5
+LANE_CREDIT = .75
+# Defending a quarter of shared visible play earns a full grade. The square
+# root rewards short, real defensive stints instead of grading raw time share.
+FULL_GRADE_SHARE = .25
 
 
 def pressure_rating(pressure_seconds, observed_seconds, coverage):
-    if observed_seconds < 10 or coverage < .35:
+    if observed_seconds < 8 or coverage < .30:
         return None
-    return round(100 * min(1, max(0, pressure_seconds / observed_seconds)), 1)
+    share = max(0, pressure_seconds / observed_seconds)
+    return round(100 * min(1, share / FULL_GRADE_SHARE) ** .5)
 
 
 def defense_rating(evidence):

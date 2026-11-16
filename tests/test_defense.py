@@ -8,17 +8,18 @@ from backend.defense import add_lane_defense, pressure_rating
 
 
 class DefenseRatingTest(unittest.TestCase):
-    def test_defense_time_is_a_percentage_without_a_multiplier(self):
-        self.assertEqual(pressure_rating(2.6, 114.5, .953), 2.3)
-        self.assertEqual(pressure_rating(5.3 + .5 * .8, 52.5, .429), 10.9)
-        self.assertEqual(pressure_rating(12, 120, 1), 10)
+    def test_lenient_curve_credits_short_defense_and_caps_at_a_quarter(self):
+        self.assertEqual(pressure_rating(2.6, 114.5, .953), 30)
+        self.assertEqual(pressure_rating(1.6 + .75 * 2.1, 97, .792), 36)
+        self.assertEqual(pressure_rating(12, 120, 1), 63)
+        self.assertEqual(pressure_rating(30, 120, 1), 100)
         self.assertEqual(pressure_rating(120, 120, 1), 100)
 
     def test_zero_pressure_gets_a_rating_when_shared_tracking_is_sufficient(self):
         self.assertEqual(pressure_rating(0, 108.1, .9), 0)
         self.assertIsNone(pressure_rating(0, 0, 0))
-        self.assertIsNone(pressure_rating(1, 9.9, .9))
-        self.assertIsNone(pressure_rating(1, 40, .34))
+        self.assertIsNone(pressure_rating(1, 7.9, .9))
+        self.assertIsNone(pressure_rating(1, 40, .29))
 
     def test_saved_evidence_is_rerated_without_mutation(self):
         directory = self.enterContext(TemporaryDirectory())
@@ -30,7 +31,7 @@ class DefenseRatingTest(unittest.TestCase):
         result = folder / "result.json"
         main.write(result, {"defense": {"13684": {"rating": 2, "pressure_seconds": 2.6,
                                                   "observed_seconds": 114.5, "coverage": .953}}})
-        self.assertEqual(main.frames(match)["defense"]["13684"]["rating"], 2.3)
+        self.assertEqual(main.frames(match)["defense"]["13684"]["rating"], 30)
         self.assertEqual(main.read(result)["defense"]["13684"]["rating"], 2)
 
     def test_held_lane_counts_when_an_opponent_turns(self):
