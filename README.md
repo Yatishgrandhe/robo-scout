@@ -63,6 +63,14 @@ PYTORCH_ENABLE_MPS_FALLBACK=1 "$runtime/bin/python" -m scripts.train /absolute/p
 
 The result is `models/ftc.pt`, selectable under **Ball detector**. For a fixed-camera Hive crop dataset, use the class name `pollen` and train with `--name hive-pollen --size 320`. To use that optional checkpoint for one recording, place it at `data/matches/<recording-id>/hive-pollen.pt`.
 
+### Full-frame ball detector from public match video
+
+The ball detector can be trained from public BIOBUZZ footage in three steps. Run each command from the repository folder with the isolated Python runtime.
+
+1. **Gather video.** `python -m scripts.gather_videos --search-only` lists BIOBUZZ videos on YouTube. Pick real gameplay, not animations or tutorials, and pass the IDs to `python -m scripts.gather_videos --ids <id,id,...>`. YouTube blocks most cloud servers, so download on a home or school network and copy `data/videos` to the training machine. Convert AV1 files to H.264 with ffmpeg if OpenCV cannot read them.
+2. **Draft and review labels.** `python -m scripts.build_ball_dataset --val-videos 3` samples a frame every 2 seconds, drafts boxes from the color rules, and holds out whole videos for validation. Each draft box appears as a numbered tile on `data/ball-dataset/review/sheet-*.jpg`. A reviewer writes `review/decisions-NNNN.json` with `{"reject": [ids], "relabel": {"id": "pollen"}}` for each sheet. Then `python -m scripts.build_ball_dataset --apply-review` rewrites the labels.
+3. **Train and evaluate.** `python -m scripts.train data/ball-dataset/dataset.yaml --device cpu --epochs 30 --size 640 --batch 8 --name ball-v1` trains the detector, then `python -m scripts.evaluate_balls data/ball-dataset models/ball-v1.pt` compares it with the color baseline on the held-out videos. Copy the checkpoint to `models/ftc.pt` to select it as the FTC ball detector.
+
 For Flowers, label tight crops of the tube and its opening with `pollen`, `red_nectar`, and `blue_nectar`. Include empty crops, stacked balls, and partially occluded pieces. Reserve whole recordings for validation. Train with `--name flower-crop --size 320 --tight-crops`. When `models/flower-crop.pt` is present, Robo Scout uses it on marked Flowers to supplement color and geometry proposals. Confirm the resulting Flower evidence from the footage.
 
 For shooting, train from confirmed and dismissed trajectories with `python -m scripts.train_shots /absolute/path/shot-labels.json`. Use the same isolated Python runtime as above. Each JSON row supplies a recording `group`, binary `label`, and `samples` as `[time, x, y]` triples with normalized coordinates. The script reports performance with each recording held out in turn. The resulting `models/shot-motion.json` enables **Prioritized shots** in the event log. Review decisions still determine the verified shot count.
