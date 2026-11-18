@@ -17,6 +17,7 @@ def main():
     parser.add_argument("--batch", type=int, default=4)
     parser.add_argument("--device", choices=["cpu", "mps"], default="mps" if torch.backends.mps.is_available() else "cpu")
     parser.add_argument("--name", default="ftc")
+    parser.add_argument("--workers", type=int, default=0, help="Data-loading processes")
     parser.add_argument("--weights", type=Path, default=ROOT / "models/yolo26n.pt")
     parser.add_argument("--tight-crops", action="store_true", help="Keep object scale and layout close to a marked Flower crop")
     args = parser.parse_args()
@@ -25,7 +26,7 @@ def main():
     model = YOLO(args.weights)
     augmentation = {"mosaic": 0, "scale": .18, "translate": .06} if args.tight_crops else {}
     model.train(data=str(args.data.resolve()), epochs=args.epochs, imgsz=args.size,
-                batch=args.batch, workers=0, cache=False, device=args.device, seed=408,
+                batch=args.batch, workers=args.workers, cache=False, device=args.device, seed=408,
                 project=str(ROOT / "runs"), name=args.name, plots=False, **augmentation)
     destination = ROOT / "models" / f"{args.name}.pt"
     shutil.copyfile(model.trainer.best, destination)

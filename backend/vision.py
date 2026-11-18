@@ -608,7 +608,7 @@ def analyze(video: Path, config, progress, launch_video: Path | None = None, hiv
             field_image = frame[y0:y1, x0:x1]
             proposals = [(kind, (box * detection_scale + detection_origin) / frame_scale, score)
                          for kind, box, score in color_detections(field_image)]
-            prediction = model.predict(field_image, imgsz=768 if config.camera_motion else 640,
+            prediction = model.predict(field_image, imgsz=960 if config.model == "ftc" else 768 if config.camera_motion else 640,
                                        conf=.17, max_det=100, device=device, verbose=False)[0]
             observed, robots, targets = [], [], {team: [] for team in roster}
             for *coords, score, cls in prediction.boxes.data.cpu().numpy():

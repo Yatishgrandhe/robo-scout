@@ -52,6 +52,7 @@ def main():
     parser.add_argument("weights", type=Path)
     parser.add_argument("--conf", type=float, default=.25)
     parser.add_argument("--size", type=int, default=640)
+    parser.add_argument("--out", default="evaluation", help="Output folder inside the dataset")
     parser.add_argument("--threshold", type=float, default=.6, help="Max center distance in ball diameters")
     args = parser.parse_args()
     model = YOLO(args.weights)
@@ -78,7 +79,7 @@ def main():
         recall = counter["found"] / max(1, counter["truth"])
         precision_vs_labels = counter["found"] / max(1, counter["predicted"])
         report[name] = {**counter, "recall": round(recall, 3), "precision_vs_labels": round(precision_vs_labels, 3)}
-    out = args.dataset / "evaluation"
+    out = args.dataset / args.out
     out.mkdir(exist_ok=True)
     for start in range(0, len(tiles), PER_SHEET):
         block = tiles[start:start + PER_SHEET]
