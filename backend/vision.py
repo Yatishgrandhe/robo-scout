@@ -41,6 +41,88 @@ def iou(a, b):
     return overlap / max(area(a) + area(b) - overlap, 1e-8)
 
 
+def signature(frame, box):
+    """Color layout of a robot: hue-saturation-value histograms of its top and bottom halves."""
+    h, w = frame.shape[:2]
+    x0, y0, x1, y1 = rect(box, w, h)
+    x0, y0, x1, y1 = max(0, x0), max(0, y0), min(w, x1), min(h, y1)
+    if x1 - x0 < 6 or y1 - y0 < 6:
+        return None
+    hsv = cv.cvtColor(frame[y0:y1, x0:x1], cv.COLOR_BGR2HSV)
+    middle = hsv.shape[0] // 2
+    halves = [cv.calcHist([part], [0, 1, 2], None, [18, 3, 3], [0, 180, 0, 256, 0, 256]).ravel()
+              for part in (hsv[:middle], hsv[middle:])]
+    return np.concatenate([half / max(half.sum(), 1) for half in halves]).astype(np.float32)
+
+
+def robot_crop(frame, box, size=128, pad=.12):
+    """A square crop around a robot box, the input of the team identity classifier."""
+    h, w = frame.shape[:2]
+    x0, y0, x1, y1 = np.array(box) * (w, h, w, h)
+    side = max(x1 - x0, y1 - y0) * (1 + 2 * pad)
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    a, b = int(max(0, cx - side / 2)), int(max(0, cy - side / 2))
+    c, d = int(min(w, cx + side / 2)), int(min(h, cy + side / 2))
+    if c - a < 4 or d - b < 4:
+        return np.zeros((size, size, 3), np.uint8)
+    return cv.resize(frame[b:d, a:c], (size, size), interpolation=cv.INTER_AREA)
+
+
+class TeamClassifier:
+    """Probability that each robot box is the seeded team, from models/identity-<team>.pt."""
+
+    def __init__(self, weights, device):
+        from ultralytics import YOLO
+        self.model = YOLO(weights)
+        self.device = device
+        self.index = next(key for key, name in self.model.names.items() if name == "team")
+
+    def __call__(self, frame, boxes):
+        if not boxes:
+            return []
+        results = self.model.predict([robot_crop(frame, box) for box in boxes], imgsz=128,
+                                     device=self.device, verbose=False)
+        return [float(result.probs.data[self.index]) for result in results]
+
+
+def similarity(gallery, candidate):
+    if candidate is None or not gallery:
+        return 0.
+    return max(1 - cv.compareHist(reference, candidate, cv.HISTCMP_BHATTACHARYYA) for reference in gallery)
+
+
+class Identity:
+    """Pick the seeded robot among robot detections by appearance.
+
+    The seed signature is permanent. Signatures from frames where the
+    track and a detection agree are added so lighting and pose can change.
+    A detection is chosen only when it clearly beats every other robot.
+    """
+
+    def __init__(self, frame, box, keep=8):
+        self.seed = signature(frame, box)
+        self.recent = []
+        self.keep = keep
+
+    @property
+    def gallery(self):
+        return [sig for sig in [self.seed, *self.recent] if sig is not None]
+
+    def confirm(self, frame, box):
+        sig = signature(frame, box)
+        if sig is not None:
+            self.recent = (self.recent + [sig])[-self.keep:]
+
+    def choose(self, frame, boxes, minimum=.55, margin=.08):
+        scored = sorted(((similarity(self.gallery, signature(frame, box)), index) for index, box in enumerate(boxes)),
+                        reverse=True)
+        if not scored or scored[0][0] < minimum:
+            return None, 0.
+        if len(scored) > 1 and scored[0][0] - scored[1][0] < margin:
+            return None, scored[0][0]
+        return boxes[scored[0][1]], scored[0][0]
+
+
 class RobotTrack:
     """Follow the user-seeded robot and leave gaps if its appearance cannot be found."""
 
@@ -116,6 +198,11 @@ class TeamTrack:
     def __init__(self, frame, gray, box, field, contour=None, nano_params=None):
         self.tracker = RobotTrack(gray, box, contour)
         self.recovery = AppearanceRecovery(frame, box, field)
+        self.identity = Identity(frame, box)
+        self.classify = None
+        self.pending = None
+        self.since_verified = 0
+        self.agreements = 0
         self.supported = box
         self.unvalidated = 0
         self.identity_frames = 0
@@ -137,6 +224,92 @@ class TeamTrack:
         except cv.error:
             self.nano = None
 
+    def reidentify(self, frame, gray, robot, detections):
+        """Follow the seeded robot through robot detections by position, then appearance.
+
+        The detection overlapping or nearest the last confirmed box continues
+        the track; robots move little between samples. The search widens while
+        the robot is unseen, so a signal dropout resumes where the robot was.
+        Appearance only separates nearby robots, or re-finds one lost for
+        several seconds. Signatures that still resemble the seed teach the gallery.
+        """
+        prior = self.supported
+        side = max(prior[2] - prior[0], prior[3] - prior[1])
+        area = (prior[2] - prior[0]) * (prior[3] - prior[1])
+        lost = self.since_verified > 30
+        reach = side * (.6 + .15 * min(self.since_verified, 20))
+
+        def plausible(box):
+            ratio = (box[2] - box[0]) * (box[3] - box[1]) / max(area, 1e-6)
+            return .4 <= ratio <= 2.2 and (iou(box, prior) > .25 or np.linalg.norm(center(box) - center(prior)) < reach)
+
+        if self.classify is not None:
+            return self.recognize(frame, gray, robot, detections, plausible)
+        candidates = detections if lost else [box for box in detections if plausible(box)]
+        if not candidates:
+            return robot, False
+        if lost:
+            best, _ = self.identity.choose(frame, candidates, minimum=.62)
+            if best is None:
+                return robot, False
+        elif len(candidates) == 1:
+            best = candidates[0]
+        else:
+            gallery = self.identity.gallery
+            scored = sorted(((iou(box, prior) + similarity(gallery, signature(frame, box))
+                              - .3 * np.linalg.norm(center(box) - center(prior)) / max(reach, 1e-6), index)
+                             for index, box in enumerate(candidates)), reverse=True)
+            if scored[0][0] - scored[1][0] < .08:
+                held = [box for box in candidates if robot is not None and iou(box, robot) > .40]
+                if len(held) != 1:
+                    return robot, False
+                best = held[0]
+            else:
+                best = candidates[scored[0][1]]
+        if self.agreements % 10 == 0 and similarity([self.identity.seed], signature(frame, best)) >= .5:
+            self.identity.confirm(frame, best)
+        return self.follow(gray, frame, robot, best)
+
+    def follow(self, gray, frame, robot, best):
+        if robot is None or iou(best, robot) < .40:
+            self.tracker = RobotTrack(gray, best)
+            self.reset_nano(frame, best)
+            self.recovery_frames += robot is None
+        self.agreements += 1
+        self.since_verified = 0
+        return best, True
+
+    def recognize(self, frame, gray, robot, detections, plausible):
+        """Follow the team's robot using its trained identity classifier.
+
+        A confident, clearly separated team detection near the track is taken
+        at once; a distant one must persist for three samples. Otherwise nearby
+        detections are ranked by overlap and team probability, and a robot that
+        the classifier rules out is never followed.
+        """
+        probability = self.classify(frame, detections)
+        order = np.argsort(probability)[::-1]
+        top = probability[order[0]]
+        runner = probability[order[1]] if len(order) > 1 else 0.
+        if top >= .7 and top - runner >= .3:
+            best = detections[order[0]]
+            if plausible(best) or self.since_verified > 30:
+                self.pending = None
+                return self.follow(gray, frame, robot, best)
+            same = self.pending is not None and np.linalg.norm(center(best) - center(self.pending[0])) < .05
+            self.pending = (best, self.pending[1] + 1 if same else 1)
+            if self.pending[1] >= 3:
+                self.pending = None
+                return self.follow(gray, frame, robot, best)
+        nearby = [(iou(box, self.supported) + 1.5 * p, index) for index, (box, p) in enumerate(zip(detections, probability))
+                  if plausible(box) and p >= .05]
+        if not nearby:
+            return robot, False
+        nearby.sort(reverse=True)
+        if len(nearby) > 1 and nearby[0][0] - nearby[1][0] < .2:
+            return robot, False
+        return self.follow(gray, frame, robot, detections[nearby[0][1]])
+
     def nano_box(self, frame):
         if self.nano is None:
             return None
@@ -157,11 +330,17 @@ class TeamTrack:
     def advance(self, frame, gray, generic, named, moving_camera, transform, anchor=None):
         if anchor is not None:
             self.tracker = RobotTrack(gray, anchor)
-            self.supported, self.unvalidated = anchor, 0
+            self.supported, self.unvalidated, self.since_verified = anchor, 0, 0
             self.recovery.find(frame, anchor, background_transform=transform)
             self.reset_nano(frame, anchor)
             return anchor
         robot = self.tracker.advance(gray, generic)
+        self.since_verified += 1
+        if generic and not named:
+            robot, verified = self.reidentify(frame, gray, robot, generic)
+            if verified:
+                self.supported, self.unvalidated = robot, 0
+                return robot
         if named:
             best, confidence = max(named, key=lambda candidate: candidate[1])
             agrees = robot is not None and iou(robot, best) > .30
@@ -550,6 +729,22 @@ def analyze(video: Path, config, progress, launch_video: Path | None = None, hiv
             warnings.append("No scoring zones were drawn. Add events in review or rerun with calibration.")
         progress(.04, "Loading YOLO weights")
         model = YOLO(weights)
+        robot_model = None
+        robot_weights = MODELS / "robot.pt"
+        if robot_weights.is_file() and "robot" not in model.names.values():
+            try:
+                robot_model = YOLO(robot_weights)
+            except (OSError, RuntimeError, TypeError, ValueError):
+                warnings.append("Robot detector unavailable. Tracking used motion and appearance only.")
+        identities = {}
+        if robot_model is not None:
+            for team in [config.team, *(seed.team for seed in config.robots)]:
+                identity_weights = MODELS / f"identity-{team.strip()}.pt"
+                if identity_weights.is_file():
+                    try:
+                        identities[team] = TeamClassifier(identity_weights, device)
+                    except (OSError, RuntimeError, TypeError, ValueError, StopIteration):
+                        warnings.append(f"Identity model for {team} unavailable. Tracking used position and appearance.")
         flower_model = None
         flower_weights = MODELS / "flower-crop.pt"
         if flower_weights.is_file() and any(zone.kind == "flower" for zone in config.zones):
@@ -611,6 +806,10 @@ def analyze(video: Path, config, progress, launch_video: Path | None = None, hiv
             prediction = model.predict(field_image, imgsz=960 if config.model == "ftc" else 768 if config.camera_motion else 640,
                                        conf=.17, max_det=100, device=device, verbose=False)[0]
             observed, robots, targets = [], [], {team: [] for team in roster}
+            if robot_model is not None:
+                found = robot_model.predict(field_image, imgsz=640, conf=.35, max_det=12, device=device, verbose=False)[0]
+                robots.extend(np.clip((np.array(coords) + detection_origin) / frame_scale, 0, 1)
+                              for *coords, _, _ in found.boxes.data.cpu().numpy())
             for *coords, score, cls in prediction.boxes.data.cpu().numpy():
                 kind = prediction.names[int(cls)]
                 box = np.clip((np.array(coords) + detection_origin) / frame_scale, 0, 1)
@@ -643,6 +842,7 @@ def analyze(video: Path, config, progress, launch_video: Path | None = None, hiv
                     box = np.array(seed.robot)
                     trackers[team] = TeamTrack(frame, gray, box, config.field,
                                                contour if team == config.team else None, nano_params)
+                    trackers[team].classify = identities.get(team)
                     boxes[team] = box
                 elif team in trackers:
                     tracking = trackers[team]

@@ -132,8 +132,14 @@ def _candidate(trail, robot, width, height):
     if len(observations) < 3:
         return None
     # A rise late in an existing track is commonly a bounce or a ball
-    # already outside the robot. Look only at the initial track.
-    for start in range(min(3, len(observations) - 2)):
+    # already outside the robot. Look only at the initial track, which
+    # begins where a ball held on the robot first moves.
+    rest = 0
+    while rest + 1 < len(observations) and np.linalg.norm(
+            observations[rest + 1][1].xy - observations[0][1].xy) <= max(3, 0.35 * observations[0][1].diameter):
+        rest += 1
+    starts = set(range(min(3, len(observations) - 2))) | set(range(rest, min(rest + 3, len(observations) - 2)))
+    for start in sorted(starts):
         segment = observations[start:start + 3]
         times = np.asarray([time for time, _ in segment])
         points = np.asarray([blob.xy for _, blob in segment])
