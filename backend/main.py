@@ -302,6 +302,82 @@ def options():
             "sam": (ROOT / "models/sam2.1_t.pt").is_file()}
 
 
+SCRIPT_LABELS = {
+    "backend.analysis_worker": "Match analysis",
+    "scripts.train": "Detector training",
+    "scripts.train_identity": "Team identity training",
+    "scripts.train_shots": "Shot model training",
+    "scripts.build_ball_dataset": "Ball dataset build",
+    "scripts.build_robot_dataset": "Robot dataset build",
+    "scripts.mine_labels": "Label correction",
+    "scripts.evaluate_balls": "Detector evaluation",
+    "scripts.gather_videos": "Video download",
+}
+
+
+def elapsed_seconds(value):
+    """ps etime: [[dd-]hh:]mm:ss."""
+    days, _, clock = value.rpartition("-")
+    parts = [int(part) for part in clock.split(":")]
+    while len(parts) < 3:
+        parts.insert(0, 0)
+    return (int(days) if days else 0) * 86400 + parts[0] * 3600 + parts[1] * 60 + parts[2]
+
+
+def robo_processes():
+    """Python processes on this Mac that run Robo Scout code, started by the app or a terminal."""
+    try:
+        output = subprocess.run(["ps", "-axo", "pid=,ppid=,etime=,pcpu=,rss=,command="], capture_output=True,
+                                text=True, timeout=5, check=True).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    rows, server = [], os.getpid()
+    for line in output.splitlines():
+        fields = line.split(None, 5)
+        if len(fields) < 6:
+            continue
+        pid, ppid, etime, cpu, rss, command = fields
+        words = command.split()
+        if not words or "python" not in Path(words[0]).name.lower():
+            continue
+        module = next((words[i + 1] for i, word in enumerate(words[:-1]) if word == "-m"), "")
+        if int(pid) == server or module.startswith("uvicorn"):
+            label = "Robo Scout server"
+        elif module in SCRIPT_LABELS or module.startswith("scripts.") or module.startswith("backend."):
+            label = SCRIPT_LABELS.get(module, module)
+        elif str(ROOT) not in command:
+            continue
+        else:
+            label = "Robo Scout script"
+        detail = ""
+        recording = re.search(r"matches/([0-9a-f]{32})/", command)
+        if recording:
+            try:
+                detail = read(MATCHES / recording.group(1) / "meta.json")["name"]
+            except (OSError, KeyError, ValueError):
+                detail = recording.group(1)
+        elif "--name" in words:
+            detail = words[words.index("--name") + 1] if words.index("--name") + 1 < len(words) else ""
+        rows.append({"pid": int(pid), "label": label, "detail": detail, "recording": recording.group(1) if recording else None,
+                     "elapsed": elapsed_seconds(etime), "cpu": float(cpu), "memory_mb": round(int(rss) / 1024),
+                     "server": label == "Robo Scout server"})
+    return sorted(rows, key=lambda row: (row["server"], -row["elapsed"]))
+
+
+@app.get("/api/activity")
+def activity():
+    """What Robo Scout is doing right now: the app's analysis and every Robo Scout process."""
+    analyses = []
+    for path in MATCHES.glob("*/meta.json"):
+        try:
+            meta = metadata(path.parent.name)
+        except (HTTPException, OSError, ValueError):
+            continue
+        if meta.get("state") == "processing":
+            analyses.append({key: meta.get(key) for key in ("id", "name", "stage", "progress")})
+    return {"analyses": analyses, "processes": robo_processes()}
+
+
 @app.get("/api/matches")
 def list_matches():
     reports = []

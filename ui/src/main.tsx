@@ -4,6 +4,7 @@ import { ArrowDownToLine, ArrowUpRight, CircleDot, Clapperboard, Film, FolderOpe
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import ActivityMonitor from "@/activity";
 import { Calibration } from "@/calibration";
 import { EventDialog, EventLog } from "@/events";
 import { isAnchorMark, isTeamMark, Player } from "@/player";
@@ -226,6 +227,7 @@ function App() {
         <span className="header-divider" />
         <span className="product-label">Robo Knights · FTC film desk</span>
         <div className="header-actions">
+          <ActivityMonitor openMatch={async id => activate(await api<Match>(openMatchUrl(id)))} />
           <Button ref={libraryButton} variant="ghost" onClick={() => setLibrary(true)} disabled={!!busy}><FolderOpen data-icon="inline-start" /> <span>Library</span></Button>
           <Button onClick={() => fileInput.current?.click()} disabled={!!busy}><Upload data-icon="inline-start" /> Import video</Button>
           <input ref={fileInput} type="file" accept="video/*,.mkv,.avi,.mp4,.mov" hidden aria-label="Choose match video" onChange={e => {

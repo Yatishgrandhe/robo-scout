@@ -386,3 +386,17 @@ a { text-underline-offset: .2em; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }
+
+.activity-panel { max-height: min(80vh, 44rem); overflow-y: auto; }
+.activity-heading { margin: 0 0 .4rem; font-size: .8rem; font-weight: 600; color: var(--muted-foreground); text-transform: uppercase; letter-spacing: .04em; }
+.activity-empty { margin: 0; color: var(--muted-foreground); font-size: .8rem; }
+.activity-list { display: grid; gap: .45rem; margin: 0; padding: 0; list-style: none; }
+.activity-row { display: flex; align-items: center; gap: .75rem; padding: .6rem .7rem; border-radius: .6rem; background: var(--muted); }
+.activity-main { display: grid; gap: .25rem; min-width: 0; flex: 1; }
+.activity-main strong { display: flex; align-items: center; gap: .35rem; font-size: .85rem; overflow-wrap: anywhere; }
+.activity-meta { color: var(--muted-foreground); font-size: .75rem; font-variant-numeric: tabular-nums; }
+.activity-id { color: var(--muted-foreground); font-size: .7rem; overflow-wrap: anywhere; }
+.activity-icon { width: .9rem; height: .9rem; flex: none; }
+.activity-bar { height: .3rem; border-radius: 99px; background: color-mix(in oklab, var(--muted-foreground) 25%, transparent); overflow: hidden; }
+.activity-bar span { display: block; height: 100%; background: var(--primary); transition: width .4s ease; }
+@media (prefers-reduced-motion: reduce) { .activity-bar span { transition: none; } }
