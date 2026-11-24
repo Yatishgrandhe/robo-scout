@@ -69,13 +69,17 @@ def robot_crop(frame, box, size=128, pad=.12):
 
 
 class TeamClassifier:
-    """Probability that each robot box is the seeded team, from models/identity-<team>.pt."""
+    """Probability that each robot box is one team.
 
-    def __init__(self, weights, device):
+    models/identity-<team>.pt is a two-class model ("team" and "other");
+    models/identity.pt has one class per team it was trained on.
+    """
+
+    def __init__(self, weights, device, team="team"):
         from ultralytics import YOLO
         self.model = YOLO(weights)
         self.device = device
-        self.index = next(key for key, name in self.model.names.items() if name == "team")
+        self.index = next(key for key, name in self.model.names.items() if name == team)
 
     def __call__(self, frame, boxes):
         if not boxes:
@@ -740,11 +744,16 @@ def analyze(video: Path, config, progress, launch_video: Path | None = None, hiv
         if robot_model is not None:
             for team in [config.team, *(seed.team for seed in config.robots)]:
                 identity_weights = MODELS / f"identity-{team.strip()}.pt"
-                if identity_weights.is_file():
-                    try:
+                shared = MODELS / "identity.pt"
+                try:
+                    if identity_weights.is_file():
                         identities[team] = TeamClassifier(identity_weights, device)
-                    except (OSError, RuntimeError, TypeError, ValueError, StopIteration):
-                        warnings.append(f"Identity model for {team} unavailable. Tracking used position and appearance.")
+                    elif shared.is_file():
+                        identities[team] = TeamClassifier(shared, device, team.strip())
+                except StopIteration:
+                    pass  # The shared model has not seen this team.
+                except (OSError, RuntimeError, TypeError, ValueError):
+                    warnings.append(f"Identity model for {team} unavailable. Tracking used position and appearance.")
         flower_model = None
         flower_weights = MODELS / "flower-crop.pt"
         if flower_weights.is_file() and any(zone.kind == "flower" for zone in config.zones):

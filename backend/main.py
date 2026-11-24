@@ -312,6 +312,8 @@ SCRIPT_LABELS = {
     "scripts.mine_labels": "Label correction",
     "scripts.evaluate_balls": "Detector evaluation",
     "scripts.gather_videos": "Video download",
+    "scripts.label_matches": "Match labeling",
+    "scripts.train_teams": "Team identity training",
 }
 
 
