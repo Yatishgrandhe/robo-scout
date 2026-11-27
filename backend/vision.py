@@ -1053,7 +1053,7 @@ def analyze(video: Path, config, progress, launch_video: Path | None = None, hiv
                     row["team"] = launch["team"]
                 events.append(row)
         if cells:
-            from .hive_entries import scan_mouths, verified_candidates
+            from .hive_entries import scan_mouths, shooter_below, verified_candidates
 
             stage = "Following Pollen into the Hive openings"
             progress(.91, stage)
@@ -1064,8 +1064,27 @@ def analyze(video: Path, config, progress, launch_video: Path | None = None, hiv
                 observations = {}
                 warnings.append("The Hive crop scan was unavailable. Used launch paths for entry suggestions.")
             alliances = {team: seed.alliance for team, seed in roster.items()} if multi else {None: config.alliance}
+            frame_times = [frame["time"] for frame in frames]
+
+            def boxes_at(team, when):
+                index = min(range(len(frames)), key=lambda k: abs(frame_times[k] - when))
+                box = frames[index].get("robots", {}).get(team) if multi else frames[index].get("robot")
+                return box if abs(frame_times[index] - when) < .25 else None
+
             for i, hit in verified_candidates(launches, cells, alliances, observations).items():
                 launch = launches[i] if isinstance(i, int) else None
+                if launch is None and multi:
+                    key = i[2]
+                    side = key.split(":")[0]
+                    team = shooter_below(hit.time, cells[key], [t for t, a in alliances.items() if a == side], boxes_at)
+                    if team is not None:
+                        # The entry proves a shot that the flight scan could not see.
+                        shot = event("pollen_launch", round(max(0, hit.time - .5), 3), "Shot inferred from a Hive entry", "",
+                                     source="vision", evidence="A ball came to rest in the Cell while this robot was "
+                                     "below it, and no launch path was visible. Check the shot.")
+                        shot["team"], shot["inferred"] = team, True
+                        events.append(shot)
+                        launch = {"time": shot["time"], "kind": "pollen", "team": team}
                 piece = launch["kind"] if launch is not None else "pollen"
                 row = event("cell_entry", hit.time, f"Possible {piece.replace('_', ' ').title()} Hive entry", "",
                             source="vision", piece=piece,

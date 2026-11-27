@@ -193,6 +193,84 @@ def _candidate(trail, robot, width, height):
     return None
 
 
+# A ballistic shot leaves robot height fast and rises a long way. These bounds
+# find it without a tracked robot box; the release is credited afterwards.
+FREE_MIN_SPEED = .45      # upward speed, frame heights per second
+FREE_MIN_RISE = .11       # total rise, frame heights
+FREE_LOWEST_START = .30   # releases start below this fraction of the frame height
+
+
+def _free_candidate(trail, width, height):
+    """A steep, sustained rise that starts at robot height, with no robot box required."""
+    observations = trail.observations
+    if len(observations) < 5:
+        return None
+    for start in range(min(3, len(observations) - 4)):
+        segment = observations[start:start + 3]
+        times = np.asarray([time for time, _ in segment])
+        points = np.asarray([blob.xy for _, blob in segment])
+        if times[2] - times[0] < 0.024:
+            continue
+        velocity = (points[2] - points[0]) / (times[2] - times[0])
+        time, first = segment[0]
+        if velocity[1] > -FREE_MIN_SPEED * height or first.xy[1] < FREE_LOWEST_START * height:
+            continue
+        upward, lowest_y = [], first.xy[1]
+        for t, blob in observations[start:]:
+            if t - time > 0.8 or blob.xy[1] > lowest_y + height * 0.012:
+                break
+            lowest_y = min(lowest_y, blob.xy[1])
+            upward.append((t, blob))
+        rise = first.xy[1] - lowest_y
+        if len(upward) < 5 or rise < max(FREE_MIN_RISE * height, 6 * first.diameter):
+            continue
+        # A thrown ball keeps a nearly constant horizontal speed; a hand or a
+        # reflection wanders. Reject paths that zigzag sideways.
+        xs = np.asarray([blob.xy[0] for _, blob in upward])
+        if np.count_nonzero(np.diff(np.sign(np.diff(xs))) != 0) > max(2, len(xs) // 3) and np.ptp(xs) > 0.02 * width:
+            continue
+        return {
+            "time": round(float(time), 3),
+            "kind": trail.kind,
+            "confidence": round(float(min(.9, .45 + rise / height)), 3),
+            "source_error": 9.0,
+            "free": True,
+            "release": [float(first.xy[0]), float(first.xy[1])],
+            "velocity": [float(velocity[0]), float(velocity[1])],
+            "samples": [[round(t, 3), round(float(b.xy[0] / width), 5), round(float(b.xy[1] / height), 5)]
+                        for t, b in upward],
+            "flight": [[round(t, 3), round(float(b.xy[0] / width), 5), round(float(b.xy[1] / height), 5)]
+                       for t, b in observations[start:]],
+        }
+    return None
+
+
+def _nearest_robot(candidate, targets, height):
+    """Credit a free release to the robot box nearest its back-projected start, within one box width."""
+    point, velocity = np.asarray(candidate["release"]), np.asarray(candidate["velocity"])
+    scored = []
+    for team, robot in targets.items():
+        best = None
+        for delay in np.linspace(0, .2, 9):
+            box = robot.at(candidate["time"] - delay)
+            if box is None:
+                continue
+            x, y = point - velocity * delay
+            left, top, right, bottom = box
+            size = max(1, right - left)
+            dx = max(left - x, 0, x - right)
+            dy = max(top - height * .03 - y, 0, y - bottom)
+            distance = np.hypot(dx, dy) / size + .4 * delay
+            best = distance if best is None else min(best, distance)
+        if best is not None:
+            scored.append((best, team))
+    scored.sort()
+    if not scored or scored[0][0] > 1.0:
+        return None, None
+    ambiguous = len(scored) > 1 and scored[1][0] - scored[0][0] < .15
+    return scored[0][1], [team for _, team in scored[:2]] if ambiguous else None
+
+
 def _stitch_fragments(candidates, width, height):
     kept = []
     scale = np.array([width, height])
@@ -300,7 +378,14 @@ def scan_launches(video: Path, frames: list[dict], config, progress=None) -> lis
                         candidate["team"] = team
                     hits.append(candidate)
             if not hits:
-                return None
+                free = _free_candidate(trail, width, height)
+                if free is None:
+                    return None
+                team, ambiguous = _nearest_robot(free, targets, height)
+                free["team"] = team
+                if ambiguous:
+                    free["ambiguous"] = ambiguous
+                return free
             hits.sort(key=lambda hit: (hit["source_error"], -hit["confidence"]))
             # Overlapping robots can both contain the release point. Keep the shot
             # with the closest robot and flag it rather than dropping a real launch.

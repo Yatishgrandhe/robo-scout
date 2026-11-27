@@ -298,7 +298,7 @@ def verified_candidates(launches, cells, alliances, observations=None):
             teams = {launches[index].get("team") for _, index in hits}
             if len(teams) > 1 and not (exact and hits[0][0] > hits[1][0] + 1):
                 # Two robots fit equally: count the entry but credit nobody.
-                unlinked[("unlinked", len(unlinked))] = found
+                unlinked[("unlinked", len(unlinked), key)] = found
                 continue
             if not hits:
                 # No path fits: credit the latest unmatched launch from that alliance, if any.
@@ -309,5 +309,28 @@ def verified_candidates(launches, cells, alliances, observations=None):
                 matches[index] = found
                 matched.add(index)
             else:
-                unlinked[("unlinked", len(unlinked))] = found
+                unlinked[("unlinked", len(unlinked), key)] = found
     return {**direct, **matches, **unlinked}
+
+
+def shooter_below(time, cell, teams, boxes_at, lead=(.3, .6, .9)):
+    """The alliance robot under a Cell just before a ball rests in it, or None if unclear.
+
+    Robots parked at the Hive base shoot almost straight up behind the Hive
+    frame, where the flight is hidden; the robot underneath is the shooter.
+    """
+    x0, y0, x1, y1 = cell
+    middle, width = (x0 + x1) / 2, x1 - x0
+    scored = []
+    for team in teams:
+        distances = []
+        for delay in lead:
+            box = boxes_at(team, time - delay)
+            if box is not None and box[1] >= y1 - .02:
+                distances.append(abs((box[0] + box[2]) / 2 - middle) / width)
+        if distances:
+            scored.append((min(distances), team))
+    scored.sort()
+    if not scored or scored[0][0] > 1.5 or len(scored) > 1 and scored[1][0] - scored[0][0] < .3:
+        return None
+    return scored[0][1]
