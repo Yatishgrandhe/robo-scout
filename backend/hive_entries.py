@@ -186,6 +186,37 @@ def scan_mouths(video: Path, cells, weights: Path | None, start, end, device, pr
         cap.release()
 
 
+def resting_entries(observations, box, rest=.4, near=.01, empty=1.5):
+    """New balls that come to rest in the Cell, one per resting position until the Cell empties.
+
+    A ball often drops onto the Cell floor in a frame or two, so no crossing is
+    tracked. Each distinct position where a ball stays `rest` seconds counts once;
+    when the Cell shows no ball for `empty` seconds (a TIP) the positions reset.
+    """
+    x0, y0, x1, y1 = box
+    candidates, resting, found, last_seen = [], [], [], None
+    for time, points in observations:
+        points = [(x, y) for x, y in points if x0 <= x <= x1 and y0 <= y <= y1]
+        if points:
+            last_seen = time
+        if resting and last_seen is not None and time - last_seen > empty:
+            resting = []
+        for x, y in points:
+            match = next((c for c in candidates if abs(c[0] - x) < near and abs(c[1] - y) < near
+                          and time - c[3] < .2), None)
+            if match is None:
+                candidates.append([x, y, time, time, [(time, x, y)]])
+            else:
+                match[0], match[1], match[3] = x, y, time
+                match[4].append((time, x, y))
+        for c in candidates:
+            if c[3] - c[2] >= rest and not any(abs(r[0] - c[0]) < near and abs(r[1] - c[1]) < near for r in resting):
+                resting.append((c[0], c[1]))
+                found.append(Arrival(c[2], c[4]))
+        candidates = [c for c in candidates if time - c[3] < .2]
+    return found
+
+
 def find_arrivals(observations, box):
     active, finished = [], []
     for time, points in observations:
@@ -197,8 +228,14 @@ def find_arrivals(observations, box):
                 finished.append(track)
         active = still_active
         associate(active, points, time, box)
-    return [found for track in finished + active
-            if (found := arrival(track, box) or arrival(track, box, .40) or settled_entry(track, box)) is not None]
+    tracked = [found for track in finished + active
+               if (found := arrival(track, box) or arrival(track, box, .40) or settled_entry(track, box)) is not None]
+    width = box[2] - box[0]
+    # A resting ball already explained by a tracked entry (same time and place) is not a second entry.
+    extra = [hit for hit in resting_entries(observations, box)
+             if not any(abs(hit.time - other.time) < .8 and abs(hit.path[-1][1] - other.path[-1][1]) < .15 * width
+                        for other in tracked)]
+    return tracked + extra
 
 
 def overlap_quality(mouth_path, flight):
@@ -226,32 +263,51 @@ def projected_quality(launch, hit, box):
 
 
 def verified_candidates(launches, cells, alliances, observations=None):
-    """Return one review suggestion per uniquely matched flight."""
+    """Return {launch index: arrival} for linked entries and {("unlinked", n): arrival} for the rest.
+
+    Cell keys are an alliance or "alliance:2" for its second Cell position.
+    """
+    side = lambda key: key.split(":")[0]
     direct = {}
     for i, launch in enumerate(launches):
         alliance = alliances.get(launch.get("team"))
-        if alliance in cells:
-            found = arrival(launch["flight"], cells[alliance])
-            if found is not None:
+        for key, box in cells.items():
+            if side(key) == alliance and i not in direct and (found := arrival(launch["flight"], box)) is not None:
                 direct[i] = found
     matched = set(direct)
-    matches = {}
-    for alliance, rows in (observations or {}).items():
-        for found in sorted(find_arrivals(rows, cells[alliance]), key=lambda hit: hit.time):
+    matches, unlinked = {}, {}
+    seen = [hit.time for hit in direct.values()]
+    for key, rows in (observations or {}).items():
+        alliance, box = side(key), cells[key]
+        for found in sorted(find_arrivals(rows, box), key=lambda hit: hit.time):
+            if any(abs(found.time - other) < .12 for other in seen):
+                continue
+            seen.append(found.time)
+            window = [i for i, launch in enumerate(launches)
+                      if alliances.get(launch.get("team")) == alliance and .18 <= found.time - launch["time"] <= 1.55]
             exact, projected = [], []
-            for i, launch in enumerate(launches):
-                if (i in matched or launch["kind"] != "pollen" or alliances.get(launch.get("team")) != alliance
-                        or not .18 <= found.time - launch["time"] <= 1.55):
+            for i in window:
+                if i in matched:
                     continue
-                score = overlap_quality(found.path, launch["flight"])
+                score = overlap_quality(found.path, launches[i]["flight"])
                 if score >= 2:
                     exact.append((score, i))
-                elif (confidence := projected_quality(launch, found, cells[alliance])) > .25:
+                elif (confidence := projected_quality(launches[i], found, box)) > .25:
                     projected.append((confidence, i))
             hits = sorted(exact or projected, reverse=True)
             teams = {launches[index].get("team") for _, index in hits}
-            if hits and (len(teams) == 1 or exact and hits[0][0] > hits[1][0] + 1):
-                _, index = hits[0]
+            if len(teams) > 1 and not (exact and hits[0][0] > hits[1][0] + 1):
+                # Two robots fit equally: count the entry but credit nobody.
+                unlinked[("unlinked", len(unlinked))] = found
+                continue
+            if not hits:
+                # No path fits: credit the latest unmatched launch from that alliance, if any.
+                hits = [(0, i) for i in sorted((i for i in window if i not in matched),
+                                               key=lambda i: launches[i]["time"], reverse=True)[:1]]
+            if hits:
+                index = hits[0][1]
                 matches[index] = found
                 matched.add(index)
-    return {**direct, **matches}
+            else:
+                unlinked[("unlinked", len(unlinked))] = found
+    return {**direct, **matches, **unlinked}

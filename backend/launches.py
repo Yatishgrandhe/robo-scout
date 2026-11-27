@@ -236,7 +236,7 @@ def _stitch_fragments(candidates, width, height):
     return kept
 
 
-def _deduplicate(candidates, width, height):
+def _deduplicate(candidates, width, height, frame_time=1 / 60):
     kept = []
     stitched = _stitch_fragments(candidates, width, height)
     for candidate in sorted(stitched, key=lambda item: item["confidence"], reverse=True):
@@ -250,7 +250,7 @@ def _deduplicate(candidates, width, height):
             distance = np.linalg.norm(
                 (samples[:, None, 1:] - other[None, :, 1:]) * [width, height], axis=2
             )
-            close = (dt < 0.016) & (distance < max(5, 0.012 * height))
+            close = (dt < 1.5 * frame_time) & (distance < max(5, 0.012 * height))
             if np.count_nonzero(np.any(close, axis=1)) >= 2:
                 duplicate = True
                 break
@@ -299,8 +299,14 @@ def scan_launches(video: Path, frames: list[dict], config, progress=None) -> lis
                     if team is not None:
                         candidate["team"] = team
                     hits.append(candidate)
+            if not hits:
+                return None
             hits.sort(key=lambda hit: (hit["source_error"], -hit["confidence"]))
-            return hits[0] if hits and (len(hits) == 1 or hits[1]["source_error"] - hits[0]["source_error"] >= .16) else None
+            # Overlapping robots can both contain the release point. Keep the shot
+            # with the closest robot and flag it rather than dropping a real launch.
+            if len(hits) > 1 and hits[1]["source_error"] - hits[0]["source_error"] < .16:
+                hits[0]["ambiguous"] = [hit.get("team") for hit in hits[:2]]
+            return hits[0]
 
         start_time = float(min(seed.seed_time for seed in (config, *other_robots)))
         end_time = config.end_time if config.end_time is not None else frames[-1]["time"]
@@ -350,7 +356,12 @@ def scan_launches(video: Path, frames: list[dict], config, progress=None) -> lis
             if previous_gray is not None:
                 motion = cv.absdiff(gray, previous_gray)
                 if np.count_nonzero(motion > 22) > 0.28 * motion.size:
-                    active = []  # A camera cut cannot establish a physical release.
+                    # A camera cut ends every trail; keep releases already seen before it.
+                    for trail in active:
+                        candidate = attributed(trail)
+                        if candidate is not None:
+                            candidates.append(candidate)
+                    active = []
                 elif np.count_nonzero(motion > 10) >= 9:
                     hsv = cv.cvtColor(frame, cv.COLOR_BGR2HSV)
                     _associate(active, _blobs(hsv, motion, offset, width, height), time, height)
@@ -362,6 +373,6 @@ def scan_launches(video: Path, frames: list[dict], config, progress=None) -> lis
             candidate = attributed(trail)
             if candidate is not None:
                 candidates.append(candidate)
-        return _deduplicate(candidates, width, height)
+        return _deduplicate(candidates, width, height, 1 / fps)
     finally:
         capture.release()

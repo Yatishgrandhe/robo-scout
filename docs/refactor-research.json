@@ -1,0 +1,1112 @@
+[
+ {
+  "topic": "Tiny fast ball detection and tracking in sports video (TrackNet family, heatmap detectors, multi-frame input, few-label training)",
+  "findings": [
+   {
+    "method": "TrackNet (original): heatmap-based CNN that takes 640x360 input, a single frame or several consecutive frames, and outputs a per-pixel ball-location heatmap. Designed for tiny, fast balls in tennis/badminton broadcast video.",
+    "how_it_applies": "Multi-frame input plus heatmap output is the design that addresses small, fast balls. Robo Scout's ~10 px Pollen/Nectar balls at 60 fps fit this regime better than single-frame YOLO boxes. Heatmap peaks also give sub-box localization and a natural way to emit missing-ball (no peak) frames for trajectory gaps.",
+    "evidence": "arXiv:1907.03698, https://arxiv.org/abs/1907.03698 (reports F1 98.5 on a main tennis video, precision 95.3 / recall 75.7 on 10-fold cross-validation over partially labeled videos; the page gives no label or frame counts; no badminton numbers on the abstract page)",
+    "effort": "medium"
+   },
+   {
+    "method": "TrackNetV4: adds learnable motion-attention maps built from frame differencing, fused with visual features through a motion-aware fusion module. Plug-and-play into TrackNetV2/V3-style heatmap trackers.",
+    "how_it_applies": "Explicit motion cues help separate the ball from static robots, the score overlay and the Hive Cell structure, reducing false positives on small similar blobs. This is a drop-in addition to a heatmap model and can reuse the existing frame-difference scanner signal.",
+    "evidence": "arXiv:2409.14543, https://arxiv.org/abs/2409.14543 and project page https://tracknetv4.github.io (abstract and project page only; no numeric tables were retrieved)",
+    "effort": "medium"
+   },
+   {
+    "method": "TrackNetV5: replaces V4's absolute frame differences with signed motion-polarity fields (Motion Direction Decoupling) and adds a Transformer residual spatio-temporal refinement head aimed at recovering occluded or missed targets. Reported F1 0.9859 and accuracy 0.9733 on the TrackNetV2 dataset with about 3.7% more FLOPs than V4.",
+    "how_it_applies": "Signed motion direction helps distinguish a ball rising into the Hive Cell from one falling or from a static robot part, which matters for the entry/no-entry question. The residual refinement is a direct answer to the 'ball path lost mid-air' problem: it fills short gaps where the ball is occluded or invisible.",
+    "evidence": "arXiv:2512.02789, https://arxiv.org/abs/2512.02789 (abstract only; the training recipe and per-dataset ablations were not retrieved)",
+    "effort": "large"
+   },
+   {
+    "method": "WASB-SBDT (Widely Applicable Strong Baseline for Sports Ball Detection and Tracking): high-resolution feature extraction, position-aware training, and temporal-consistency inference. Reports AP gains of 7.8 to 16.8% over six prior SBDT methods on five datasets across sports, and ships open-source code and datasets.",
+    "how_it_applies": "A cross-sport, pretrained-style baseline that generalizes beyond one court. Its high-resolution training and temporal-consistency post-processing are the parts most transferable to Robo Scout, and the repo gives a ready benchmark to compare the current YOLO26 ball detector against on the 20 labeled videos before committing to a rewrite. Note the paper says it is not the fastest method.",
+    "evidence": "arXiv:2311.05237, https://arxiv.org/abs/2311.05237 (BMVC 2023); code https://github.com/nttcom/WASB-SBDT",
+    "effort": "small"
+   },
+   {
+    "method": "SAHI (Slicing Aided Hyper Inference): run the detector on overlapping tiles of the full frame (plus optional full-frame pass) to raise small-object recall; reported AP gains of roughly 5-7 points from inference alone on VisDrone/xView and more with slicing-aware fine-tuning.",
+    "how_it_applies": "Robo Scout's 10 px balls at 1280x720 are below the stride-level resolution of a standard YOLO input. Tiling the frame (or a Hive Cell ROI at higher effective resolution) is a training-free way to improve recall that works directly with the existing YOLO26 ball model, at a compute cost roughly proportional to tile count. It is not sports-specific and was not validated on ball sports in the sources found.",
+    "evidence": "arXiv:2202.06934, https://arxiv.org/abs/2202.06934 (SAHI paper; gains reported on VisDrone and xView, aerial data)",
+    "effort": "small"
+   },
+   {
+    "method": "Semi-supervised / pseudo-label training for ball detection from few labels: a teacher detector produces pseudo-labels on unlabeled broadcast frames to train a student, with a small labeled seed set (soccer player and ball detection).",
+    "how_it_applies": "Robo Scout has about 20 labeled matches with per-launch reviews. Pseudo-labeling unlabeled frames from the held-out-style broadcast, with the current detector as teacher and confidence filtering, could expand the ball training set without new annotation. The sports-specific results found are for soccer, not tiny 10 px balls, so gains on Robo Scout must be measured.",
+    "evidence": "arXiv:2204.06859, https://arxiv.org/abs/2204.06859 (Vandeghen et al., CVsports 2022); a tennis progressive semi-supervised framework in IEEE Access Jan 2024 (https://doaj.org/article/a55638e525d3468ab5206dd6593dae71) was found but not read in full",
+    "effort": "medium"
+   },
+   {
+    "method": "Motion/temporal cues for tiny-ball gating: frame-difference and polarity signals together with an explicit track state (predict through gaps, reacquire) rather than per-frame detection alone.",
+    "how_it_applies": "Addresses the finding that only one Hive entry is found because balls are lost mid-air. A tracker that keeps a constant-velocity or learned-motion state through short detection gaps, with the heatmap/motion model re-detecting, gives continuous paths for the entry classifier. This ties to TrackNetV5's refinement head conceptually; the specific gap-filling parameters were not retrieved.",
+    "evidence": "Derived from arXiv:2512.02789 (https://arxiv.org/abs/2512.02789) and arXiv:2409.14543 (https://arxiv.org/abs/2409.14543); the concrete tracker design is an inference, not a sourced recipe",
+    "effort": "medium"
+   }
+  ],
+  "recommendation": "Replace the single-frame YOLO ball detector with a multi-frame heatmap tracker in the TrackNet lineage (start with TrackNetV4's motion-attention fusion on top of the TrackNet heatmap design, or TrackNetV5 if its code is available), trained at the native 1280x720 resolution or on Hive-Cell ROI crops for effective resolution. First benchmark the existing YOLO26 ball detector against WASB-SBDT (https://github.com/nttcom/WASB-SBDT) on the 20 labeled videos, and add SAHI-style tiling as a cheap recall boost while the heatmap model is built. Expand training labels by pseudo-labeling unlabeled frames with the current teacher. Keep a gap-tolerant track state so Hive entries are not lost mid-air. Caveat: TrackNetV5 and V4 numbers come from abstracts only, and no source found reports 10 px balls at 60 fps directly, so validate on the 20 labeled videos before relying on any reported gain."
+ },
+ {
+  "topic": "Basketball made/missed shot detection from a fixed camera: hoop-region analysis, ball-in-hoop classification, open-source projects and accuracy",
+  "findings": [
+   {
+    "method": "Rule-based ball-in-hoop outcome from ball motion near the rim (Roboflow shot evaluator)",
+    "how_it_applies": "When the ball disappears near the rim (occluded by the net), decide make vs miss from its vertical speed relative to freefall: 10-90% of freefall = made (net drag), 100% = airball passing behind rim, 0% = stationary ball rejected. Robo Scout's Hive Cell is the analogue of the rim, but balls rise from below into the cell in this view, so the sign and reference frame must be reversed; the speed-ratio idea still transfers. Also tags ambiguous cases (occluded, rattled) instead of forcing a label, which fits the 'only 1 of many entries found' problem: report uncertainty rather than dropping the event.",
+    "evidence": "https://roboflow.com/blog/how-to-build-an-ai-basketball-shot-evaluator (fetched; blog.roboflow.com URL redirects here); code: https://github.com/aarnavshah12/shot-tracker (linked from the article, not fetched directly)",
+    "effort": "medium"
+   },
+   {
+    "method": "Occlusion-tolerant tracking with a release-to-rim trajectory state machine (Roboflow shot evaluator)",
+    "how_it_applies": "The article defines a shot start as ball separation from the shooter's wrist while moving upward, then requires the projected arc to point toward the rim box or the attempt is discarded. It keeps a stateful engine across frames (positions, velocities, detection confidence). This is a direct fix for Robo Scout's mid-air track loss: keep a per-shot state from launch to Cell entry, allow gaps, and link the launch event to the outcome event instead of re-detecting each frame. Its reported failure mode (net hides ball for 2 frames, two makes logged as misses) is exactly the risk Robo Scout faces, so gap tolerance must be tuned explicitly.",
+    "evidence": "https://roboflow.com/blog/how-to-build-an-ai-basketball-shot-evaluator (fetched)",
+    "effort": "medium"
+   },
+   {
+    "method": "RF-DETR small detector for ball and rim, trained on a fork of a public shooting dataset (~9.8k images)",
+    "how_it_applies": "Reported ball/rim detector metrics are mAP50 88.84, precision 75.7, recall 84.9, with the ball detected in 98.1% of in-flight frames (759/774). These are the only concrete detection-accuracy numbers found for a basketball shot pipeline. Robo Scout's YOLO26 ball detector is a similar setup; the benchmark gives a reference for what a single-camera ball/rim detector achieves, and the gap to 98% in-flight recall is a target to measure against. Dataset: University of Arizona 'Basketball Shooting Robot' (named in the article; not fetched).",
+    "evidence": "https://roboflow.com/blog/how-to-build-an-ai-basketball-shot-evaluator (fetched)",
+    "effort": "small"
+   },
+   {
+    "method": "Faster R-CNN ball and rim detector with a per-shot make/miss README (anishcd/basketball-shot-detection)",
+    "how_it_applies": "Two-class detector (Basketball, Rim) with Faster R-CNN ResNet-50 FPN, trained with SGD. The README says it classifies makes and misses, but the fetched page does not show the decision logic and reports no accuracy, precision, recall or mAP. Use only as a baseline for a two-class rim+ball detector; do not rely on its make/miss claim.",
+    "evidence": "https://github.com/anishcd/basketball-shot-detection (fetched); license not stated on page",
+    "effort": "small"
+   },
+   {
+    "method": "Trajectory curve fit plus hoop overlay (chonyy/basketball-shot-detection)",
+    "how_it_applies": "Page shows color-coded outcomes (orange hoop, blue ball, purple undetermined, red miss, green make) and trajectory-fit figures, suggesting a curve is fit to tracked ball points and compared with the hoop. The page does not state the comparison rule or any accuracy number. The approach (fit a parabola to the launch-to-hoop track, extrapolate whether it crosses the hoop opening) is useful for Robo Scout's trajectory features, but the source gives no evidence it works.",
+    "evidence": "https://github.com/chonyy/basketball-shot-detection (fetched; no LICENSE visible in the listing)",
+    "effort": "small"
+   },
+   {
+    "method": "Patent-described hoop ROI with background subtraction (net motion as make signal)",
+    "how_it_applies": "Patents describe a hoop ROI enclosing the rim, with motion in that region (via background subtraction such as MOG, or a CNN) used as a make/miss signal, and Tiny YOLO for shooter foot position. Net-motion detection is a classical cue that does not depend on the ball being visible; it could complement the Cell-tip signal (the Cell tipping is ground truth for entry). Patent claims are not validated accuracy; treat as idea sources only.",
+    "evidence": "Search result snippets from https://image-ppubs.uspto.gov/dirsearch-public/print/downloadPdf/11400355 and https://image-ppubs.uspto.gov/dirsearch-public/print/downloadPdf/11594029 (snippets only, not fetched)",
+    "effort": "medium"
+   },
+   {
+    "method": "Accuracy gap: no open-source made/missed accuracy benchmark found",
+    "how_it_applies": "Searches found no peer-reviewed or public benchmark reporting made/missed accuracy from a fixed side camera. The NCAA event-recognition paper (arXiv 2007.06288) reports 0.887 success/failure activity performance at threshold 0.7, but this is an activity-level metric on a different task. Robo Scout should build its own evaluation on its ~20 labeled matches (per-launch and per-entry labels) rather than trust any external number.",
+    "evidence": "https://arxiv.org/pdf/2007.06288 (search snippet only, not fetched)",
+    "effort": "small"
+   }
+  ],
+  "recommendation": "Replace per-frame hoop-entry detection with a per-shot state machine: link each launch (wrist separation plus upward velocity, arc projected toward the Cell box) to an outcome, allow occlusion gaps, and decide entry from the ball's speed and position near the Cell (the Roboflow drop-speed rule, with direction reversed for balls rising from below), plus a tipping-based ground-truth check. Tag ambiguous shots instead of dropping them. Use the Roboflow reference numbers (ball recall about 98% in flight) as a target, and measure against Robo Scout's own labeled matches because no external made/missed accuracy benchmark was found."
+ },
+ {
+  "topic": "Counting objects entering a container or goal region from video (made-basket counters, bin-entry counting): ROI state machines, persistence-based confirmation, occlusion by rim/frame",
+  "findings": [
+   {
+    "method": "Per-track LineZone-style crossing with persistence confirmation: a side change is counted only after the new side is held for minimum_crossing_threshold consecutive observations, and per-track side history is dropped only after max_absent_frames (default max(30, threshold+1)).",
+    "how_it_applies": "Replace per-frame 'ball inside Hive Cell box' tests with a per-track state (outside / inside-candidate / inside-confirmed). Require N consecutive frames inside the Cell ROI (or across its rim plane) before counting an entry, which suppresses single-frame detector flicker. Keep the track's state alive for a max-absent window so a ball that vanishes behind the rim or net for a few frames is not reset to a new, uncounted track. Negative or unconfirmed track IDs must never be counted, which matters given the identity-swap problem.",
+    "evidence": "https://supervision.roboflow.com/latest/detection/tools/line_zone/ (LineZone.trigger: minimum_crossing_threshold, per-track side history, max_absent_frames, negative tracker_id never counted)",
+    "effort": "small"
+   },
+   {
+    "method": "PolygonZone entry counting via a seen-set of tracker IDs: zone.trigger(detections) gives per-frame in-zone masks and current_count is the instantaneous count; entries are counted by keeping a set of tracker_ids first observed inside the zone.",
+    "how_it_applies": "Robo Scout can count a Cell entry once per ball track by adding the track ID to a set on first confirmed in-zone observation, and attribute it to the launching robot via the launch-to-track association instead of the current robot track ID, which avoids the identity-swap error at the moment of entry. Note that current_count alone undercounts because balls settle and leave the zone.",
+    "evidence": "https://supervision.roboflow.com/0.29.0/how_to/count_in_zone/ and https://blog.roboflow.com/how-to-count-objects-in-a-zone (search snippets only, not fetched in full)",
+    "effort": "small"
+   },
+   {
+    "method": "Made-basket state machine with trajectory fitting and occlusion disambiguation by drop-speed relative to freefall: the ball is detected in flight, a release is logged only when the ball separates upward from the shooter, a parabola is fitted and projected toward the rim box, and when the ball reappears after being hidden, its vertical speed relative to freefall (10 to 90 percent = net make, 100 percent = behind-rim miss, 0 = stationary/rejected) decides the outcome. Ambiguous cases are tagged 'occluded' or 'rattled' rather than guessed.",
+    "how_it_applies": "Directly targets Robo Scout's lost-mid-air problem: a ball that rises into the Cell from below and disappears behind the Cell edge can be resolved by fitting a parabola to the pre-occlusion track, projecting it, and checking the re-acquired ball's motion against freefall or settling behavior. Tagging ambiguous events as 'occluded' gives a per-shot confidence field and avoids silent misses. Porting this needs the Cell's pixel rim box and a pixels-per-meter scale, which the article derives from rim width.",
+    "evidence": "https://roboflow.com/blog/how-to-build-an-ai-basketball-shot-evaluator (fetched; redirect from blog.roboflow.com). Code: https://github.com/aarnavshah12/shot-tracker (repo linked from article, not opened)",
+    "effort": "medium"
+   },
+   {
+    "method": "Dual-evidence confirmation: count an entry only when the ball is seen entering the Cell and is then not seen exiting it, or when a settled ball is detected inside the Cell box; treat front-rim bounce-outs as a separate state (rattled miss) using a bounce-near-hoop pause.",
+    "how_it_applies": "Robo Scout's Cell is a container whose balls settle inside, so 'ball appears inside and stays' is a strong positive even when the in-flight track is broken. Pausing the state machine during rim bounces avoids double-counting or false misses from bounce-outs.",
+    "evidence": "https://roboflow.com/blog/how-to-build-an-ai-basketball-shot-evaluator (fetched, 'rattled make/miss' and bounce pause described)",
+    "effort": "medium"
+   },
+   {
+    "method": "Failure-mode reference: the same article reports that two genuine makes were recorded as misses because the net hid the ball for two frames, and that pump fakes triggered false launches until a wrist-separation rule was added.",
+    "how_it_applies": "Expect a few-frame occlusion to be the main source of missed Cell entries; the Robo Scout counter needs an occlusion grace window and a launch-onset rule (ball separating from robot/launcher region moving upward) to avoid false shots.",
+    "evidence": "https://roboflow.com/blog/how-to-build-an-ai-basketball-shot-evaluator (fetched)",
+    "effort": "small"
+   },
+   {
+    "method": "Zone-based patent approaches (attempt zone, make zone, entry/exit states; ROI split into 9 zones; background-subtraction net check).",
+    "how_it_applies": "Supports a design where the Cell is split into an entry band (just above the rim), an inside band, and an exit band, and entries are confirmed by the ordered sequence entry-then-inside. Background subtraction (MOG) on the Cell interior can serve as a cheap settle/occupancy signal that does not depend on the ball detector.",
+    "evidence": "US patents found via search: https://image-ppubs.uspto.gov/dirsearch-public/print/downloadPdf/11594029 and https://image-ppubs.uspto.gov/dirsearch-public/print/downloadPdf/10489656 (search snippets only, claims not read in full)",
+    "effort": "medium"
+   }
+  ],
+  "recommendation": "Rebuild the Hive Cell counter as a per-track ROI state machine (outside, candidate-inside, confirmed-inside) with an N-frame persistence threshold and a max-absent grace window so that tracks lost behind the rim are kept alive instead of reset, and count each track ID at most once. Attribute each entry to the robot via the launch association captured at launch time, not the current identity-swapping robot track. Add the parabolic-arc projection plus drop-speed-vs-freefall rule from the shot-tracker article to resolve occluded in-flight balls, and add a settled-ball-inside-Cell check as a second positive signal. Note that the shot-tracker repo and the NYU repo were not opened, and the patents were checked from search snippets only."
+ },
+ {
+  "topic": "Attributing a projectile to its source robot/player: backtracking ball trajectories to the launch point, parabolic fitting, linking release to the nearest tracked agent (sports analytics \"who shot/passed the ball\")",
+  "findings": [
+   {
+    "method": "Physics-constrained parabola fit per flight segment, then backtrack to the launch point and time (Tracker-style workflow: fit x(t), y(t) and read launch velocity/angle from coefficients, with the origin fixed at the launch point)",
+    "how_it_applies": "Robo Scout loses balls mid-air, so fit short ballistic segments (x = x0 + vx*t, y = y0 + vy*t - g*t^2/2 in image coordinates with a known scale) on each confident run of ball detections. Solve for launch time and position by back-projecting to where the ball leaves the robot's bounding box. Use the fitted launch point, not the last-seen track position, to attribute the shot. Parabola fitting is the simplest constrained model and tolerates the 10 px Pollen ball's noisy centroids better than free-form smoothing.",
+    "evidence": "Tracker/projectile-motion fitting workflows, e.g. Parabolic Trajectory of a Basketball Shot video study (https://www.fizziq.org/en/activities/basketball/); Tracker pedagogical paper (https://arxiv.org/pdf/1206.6489); Glossary: y = x*tan(a) - g*x^2/(2*v0^2*cos^2(a)) approximation for short trajectories (https://www.fizziq.org/en/glossary/parabolic-trajectory/)",
+    "effort": "small"
+   },
+   {
+    "method": "Joint ballistic fit across a gap: treat two detected segments separated by a mid-air dropout as one flight if a single (x0, y0, vx, vy, g fixed) model explains both within pixel tolerance, and use the fit to bridge lost frames",
+    "how_it_applies": "Directly targets the diagnosed failure (only 1 of many Hive entries found because paths are lost mid-air). Balls rising into the Hive Cell from below can be linked through occlusion by requiring one parabola to explain pre-gap and post-gap detections, which also yields the Hive-entry crossing point for the shot classifier. Reject links whose residual exceeds a threshold to avoid merging balls from different robots.",
+    "evidence": "Constrained parabola / least-squares trajectory fitting as described in the Tracker and fizziq sources above; the general approach of fitting a single ballistic model to tracked positions to read launch parameters (no single paper found that matches this exactly; treat as an engineering extension of the cited parabola-fitting method)",
+    "effort": "medium"
+   },
+   {
+    "method": "Possession-by-nearest-player with a calibrated radius, applied at the launch event (ball-to-agent distance threshold, closest agent wins)",
+    "how_it_applies": "Adapt the sports rule to launches: at the launch frame (from the existing frame-difference/color launch scanner), assign the shot to the robot whose box is closest to the ball and within a radius. Calibrate the radius empirically in pixels, not from a fixed metric value, since sports papers use per-setup thresholds. This gives a deterministic baseline to compare against the current identity-model attribution, which is failing from track ID swaps.",
+    "evidence": "arXiv 2509.22522 (JointDiff, multi-agent trajectories): sweeps possession distance 0-3 m and reports about 1.5 m as the threshold where direction change is smallest, assigning possession to the closest player within that radius (https://arxiv.org/pdf/2509.22522; OpenReview version: https://openreview.net/pdf/97d90a1188f72b95ea556fbe60ad2bfafdc81141.pdf). arXiv 2508.09238 (ELASTIC) uses a ~3 m ball-player cutoff to identify the executing player and the closest player at the end frame as receiver (https://arxiv.org/html/2508.09238v1). IJICIC basketball-style video uses a 50 px threshold chosen from 40/50/60 px (http://www.ijicic.org/ijicic-220107.pdf). Note: the 1.5 m and 3 m values were seen in search snippets and only partially verified.",
+    "effort": "small"
+   },
+   {
+    "method": "Event-anchored, possession-first tracking: track agents and assign possession first, then use agent trajectories to reconstruct the ball, rather than the reverse",
+    "how_it_applies": "Robo Scout's robot-track identity swaps are the root of the wrong-robot credit. Instead of trusting a persistent robot track ID across the whole match, resolve identity locally at each launch event (the robot that holds/launches the ball at that moment, using roster classifier votes over a short window around the launch). Attribution then depends only on local identity near the launch, which is far less exposed to long-horizon ID swaps.",
+    "evidence": "Optical tracking in team sports, arXiv 2204.04143 (https://arxiv.org/pdf/2204.04143) and 'Take your eyes off the ball: Improving ball-tracking by focusing on team play', Computer Vision and Image Understanding (https://www.sciencedirect.com/science/article/abs/pii/S1077314213002300) which tracks players and assigns possession first, then reconstructs the ball, for ball-centric sports such as basketball and soccer",
+    "effort": "medium"
+   },
+   {
+    "method": "Sequence model over agent-to-ball possession states (CRF + Viterbi decoding picking one possession edge per time step, flagging an event when the selected edge changes)",
+    "how_it_applies": "Once several candidate robots are near a ball, a CRF with forbidden transitions can produce a consistent possessor sequence, which prevents attributing one launch to two robots and gives a principled way to handle ambiguous near-robot frames. Needs per-frame robot-ball features; training data would come from the ~20 labeled matches' per-launch reviews.",
+    "evidence": "PathCRF, arXiv 2602.12080 (https://arxiv.org/abs/2602.12080; HTML: https://arxiv.org/html/2602.12080): detects soccer ball-control and pass events from player trajectories only, using a CRF over possession edges with Viterbi decoding. The page reports no quantitative results in the fetched content, so accuracy is unverified.",
+    "effort": "large"
+   },
+   {
+    "method": "Learned possessor classifier from player-centric features (per-robot likelihood of having launched the ball at each frame)",
+    "how_it_applies": "Replace the hand-set nearest-robot rule with a small learned scorer over per-robot features (ball-to-box distance, ball velocity direction relative to robot, time since launch, roster identity score) trained on the labeled launches. This generalizes the single-threshold baseline and can be trained cheaply on the existing labels.",
+    "evidence": "SciTePress 2025 video-based possessor recognition paper, which scores per-player possession likelihood from video and detects passes from possession changes (https://www.scitepress.org/Papers/2025/133177/133177.pdf); arXiv 2512.19528 multi-modal soccer model that jointly infers ball state and possessor (https://arxiv.org/pdf/2512.19528)",
+    "effort": "medium"
+   },
+   {
+    "method": "Commercial sensor-based shot attribution (vendor claim, unverified)",
+    "how_it_applies": "Shows that shot-to-shooter attribution without wearables is a commercial product category, but the mechanism (arena sensors sampling ball position at a fixed rate and auto-tagging the shooter) is not transferable to a single side-view camera. Not recommended as a method for Robo Scout.",
+    "evidence": "Noah Basketball products page (https://www.noahbasketball.com/products). Vendor claim only, not independently verified.",
+    "effort": "large"
+   }
+  ],
+  "recommendation": "For Robo Scout, attribute each launch by back-projecting a physics-constrained parabola (fit per flight segment, and across mid-air dropouts with one shared ballistic model) to its launch point and time, then assign the shot to the robot whose box contains or is nearest to that launch point at that frame, using roster identity votes in a short window around the launch rather than the long-run track ID. Calibrate the proximity radius in pixels on the labeled launches and use it as a baseline. Treat the sports possession papers (nearest-player thresholds, possession-first tracking, PathCRF) as supporting methods; none of the sources found describes backtracking a projectile in exactly this setup, and the thresholds (1.5 m, 3 m, 50 px) are setup-specific and only partially verified."
+ },
+ {
+  "topic": "Multi-object tracking for visually similar objects with re-ID (ByteTrack, BoT-SORT, OC-SORT, StrongSORT, Deep OC-SORT) and Ultralytics integration",
+  "findings": [
+   {
+    "method": "BoT-SORT with ReID (with_reid: True) for robot tracks",
+    "how_it_applies": "Robot identity swaps happen when two similar robots cross or occlude each other. BoT-SORT fuses IoU and appearance-ReID distance in association, uses camera motion compensation (GMC), and a Kalman state that tracks box width/height. It is the best-documented appearance option in Ultralytics (supported by with_reid). Use it for the 4 robot tracks only. Appearance cues between near-identical robots are weak, so pair it with the team/identity classifier as a per-track vote, not a per-frame label.",
+    "evidence": "BoT-SORT paper https://arxiv.org/abs/2206.14651 (reports BoT-SORT-ReID 65.0 HOTA, 80.2 IDF1 on MOT17 test, private detector); Ultralytics tracking docs https://docs.ultralytics.com/modes/track/ (with_reid off by default, supported by BoT-SORT, Deep OC-SORT, TrackTrack)",
+    "effort": "small"
+   },
+   {
+    "method": "Deep OC-SORT (adaptive appearance gating)",
+    "how_it_applies": "Deep OC-SORT adds appearance to OC-SORT and adaptively integrates it, so appearance is down-weighted when detector confidence is low (occlusion/blur). This directly targets the failure mode where a robot is partly hidden and its appearance feature is unreliable, which is likely the cause of identity swaps at the moment of crossing. It is listed in Ultralytics as a supported tracker with with_reid. Compare against BoT-SORT-ReID on the held-out match.",
+    "evidence": "Deep OC-SORT paper https://arxiv.org/abs/2302.11813 (abstract: 63.9 HOTA MOT20, 64.9 HOTA MOT17, 61.3 HOTA DanceTrack; argues heuristic appearance use is not robust to feature degradation); Ultralytics docs https://docs.ultralytics.com/modes/track/ (tracker_type deepocsort)",
+    "effort": "small"
+   },
+   {
+    "method": "ByteTrack and OC-SORT (motion-only) for the ball tracks",
+    "how_it_applies": "Balls are about 10 px and have no useful appearance, so ReID adds nothing. ByteTrack's two-stage association keeps low-confidence detections, which suits small, blurred balls in flight. ByteTrack has no appearance model and no camera-motion compensation, per the Ultralytics docs. OC-SORT's observation-centric re-update is a better fit for objects whose motion changes abruptly. Caveat (my inference, not from the sources): a constant-velocity Kalman filter does not model a ballistic arc. A gravity-aware or quadratic motion model, or segmenting each launch as one trajectory and fitting it, is likely needed to bridge the mid-air gaps that break ball paths.",
+    "evidence": "Ultralytics docs https://docs.ultralytics.com/modes/track/ (ByteTrack: no appearance model, no GMC); OC-SORT paper https://arxiv.org/pdf/2203.14360 (observation-centric re-update, same-detection comparison with ByteTrack, 63.2 vs 63.1 HOTA on MOT17 as quoted in the Deep OC-SORT paper)",
+    "effort": "medium"
+   },
+   {
+    "method": "StrongSORT (and StrongSORT++, offline)",
+    "how_it_applies": "StrongSORT upgrades DeepSORT with a stronger appearance embedding, EMA appearance update, and motion correction. StrongSORT++ adds offline post-processing (link interpolation/association over the whole clip). For this project, the offline post-processing is attractive because the full match video is available in advance, so an offline pass could repair fragmented robot tracks and merge ball segments. Not a fit for live use. I did not fetch the StrongSORT paper; the numbers below come from search snippets only.",
+    "evidence": "StrongSORT paper https://arxiv.org/pdf/2202.13514; Roboflow comparison https://trackers.roboflow.com/latest/trackers/comparison/ (search snippet: StrongSORT++ 64.4 HOTA on MOT17, offline method)",
+    "effort": "large"
+   },
+   {
+    "method": "Ultralytics integration: custom tracker YAML and custom ReID weights",
+    "how_it_applies": "Ultralytics takes tracker=<name>.yaml in model.track(); copy botsort.yaml or deepocsort.yaml, set with_reid: True, and set model to a custom .pt or exported ONNX/torchscript encoder (the default model: auto reuses detector features and falls back to yolo26n-cls.pt). Tuning keys: track_high_thresh, track_low_thresh, new_track_thresh, track_buffer, match_thresh, gmc_method, proximity_thresh (min IoU for a ReID match), appearance_thresh (min appearance similarity). The docs say ReID train/val/predict modes are still under development, so to use a fine-tuned identity backbone for robots you must supply a custom checkpoint or export an embedding model yourself. Older GitHub mirrors of botsort.yaml predate ReID support, so use the installed ultralytics/cfg/trackers files.",
+    "evidence": "Ultralytics tracking docs https://docs.ultralytics.com/modes/track/ (config keys, model options, ReID status); Ultralytics default tracker is TrackTrack per the same page, which conflicts with some mirrors that say BoT-SORT, so verify in the installed version",
+    "effort": "small"
+   },
+   {
+    "method": "Do not rely on tracker ID alone for robot identity: vote per track with the team classifier",
+    "how_it_applies": "Even the best ReID tracker can swap IDs. Keep a per-track history of the 87%-accurate roster classifier outputs and assign the robot identity by majority vote over a sliding window, and lock identity only when a track is unambiguous (not near another robot). This fixes wrong-robot credit at the scoring step rather than the tracker step.",
+    "evidence": "Derived from BoT-SORT and Deep OC-SORT paper designs (appearance gated by confidence) cited above; this is a design recommendation, not a sourced result",
+    "effort": "small"
+   }
+  ],
+  "recommendation": "Use BoT-SORT with with_reid: True (or Deep OC-SORT, which adaptively gates appearance under occlusion) for the four robot tracks, with a custom ReID checkpoint if the default auto model cannot separate the robots. Keep ByteTrack (no ReID) or OC-SORT for balls, and fix the mid-air gaps with a ballistic motion model rather than appearance. Attribute shots to robots by majority-voting the identity classifier over each track's history instead of trusting raw tracker IDs. Evaluate on the held-out match by counting ID switches before and after. Note: this was a single-agent research pass; the requested 20-agent research fan-out was not performed here."
+ },
+ {
+  "topic": "FRC/FTC robot tracking, bumper identity, and scoring detection from match video (for Robo Scout)",
+  "findings": [
+   {
+    "method": "Robot detection on bumpers, not whole robots, with a two-class alliance label (Red/Blue)",
+    "how_it_applies": "Roboflow's FRC robot-path project labeled bumpers because they reduce overfitting to each year's robot shapes and transfer across seasons. Robo Scout could detect bumpers and classify alliance by color, then use bumper-color/number crops to anchor robot identity instead of relying only on the full-robot team-classifier.",
+    "evidence": "https://roboflow.com/blog/robot-path-mapping (fetched via redirect from https://blog.roboflow.com/robot-path-mapping/); project code https://github.com/NimbleValley/auto-scout",
+    "effort": "small"
+   },
+   {
+    "method": "Distance-based greedy tracker run per alliance, with gap handling (skip frames with too few detections)",
+    "how_it_applies": "The Roboflow project matches detections to the previous frame by sorting pairwise distances and assigning closest pairs first. It is simple, but the author reports no accuracy metrics and skips frames with only one or two detections, which leaves gaps. It is a weak baseline for identity swaps between similar robots, though it may suffice when alliance-level tracks are already separated.",
+    "evidence": "https://roboflow.com/blog/robot-path-mapping",
+    "effort": "small"
+   },
+   {
+    "method": "SAHI slicing-aided (tiled) inference for small objects, usable with Ultralytics YOLO",
+    "how_it_applies": "Yellow Pollen balls are about 10 px in a 1280x720 frame, which is a small-object regime. Running the existing YOLO ball detector on overlapping tiles (and optionally slice-assisted training, as in YOLOv8-SMOT) should raise ball recall before any tracking. SAHI's page lists Ultralytics support, including YOLO26 demos, so it fits the current stack. No accuracy numbers were available on the page.",
+    "evidence": "https://github.com/obss/sahi (supports ultralytics>=8.3.161 per README); YOLOv8-SMOT code https://github.com/Salvatore-Love/YOLOv8-SMOT (arXiv 2507.12087, slice-assisted training + adaptive association; paper text not extractable, so its numbers are unverified)",
+    "effort": "small"
+   },
+   {
+    "method": "Occlusion-aware multi-frame ball trajectory network (TOTNet): 3D-conv U-Net over 5 frames, occlusion masking augmentation, visibility-weighted loss",
+    "how_it_applies": "Hive-cell entries happen when balls rise into the cell and vanish from view, so per-frame detection loses them. TOTNet's occlusion augmentation (masking the ball region in the target frame) and visibility-weighted loss train the model to infer trajectories through occlusion. Reported gains on fully occluded table-tennis frames: RMSE 37.30 to 7.19, accuracy 0.63 to 0.80. The base model runs ~28 FPS and the optical-flow variant ~12 FPS, which suits offline analysis.",
+    "evidence": "https://arxiv.org/html/2508.09650v1 (TOTNet, code https://github.com/AugustRushG/TOTNet). Domain is table tennis (TTA dataset), not FRC, so it must be retrained on Robo Scout's footage.",
+    "effort": "large"
+   },
+   {
+    "method": "TrackNet-family heatmap tracking with trajectory rectification (TrackNetV3 repair masks); TrackNetV4 motion attention",
+    "how_it_applies": "TrackNet is a multi-frame heatmap network built for tiny fast sports objects (original paper reports F1 98.5% on tennis). TrackNetV3 adds trajectory rectification to repair errors, which targets the missed-detection problem. TrackNetV4 adds frame-differencing motion attention and claims gains on occlusion, but its abstract gives no numbers. A master's thesis on football found TrackNet fails when the ball is still or frequently occluded, which matters for balls that sit in the cell.",
+    "evidence": "https://arxiv.org/pdf/1907.03698 (TrackNet, arXiv 1907.03698); https://arxiv.org/pdf/2409.14543 (TrackNetV4, no code link found); thesis via https://odr.chalmers.se/server/api/core/bitstreams/a09ccd10-bc5a-4afe-aa6e-3fe4498e3897/content",
+    "effort": "medium"
+   },
+   {
+    "method": "Kalman trackers with observation-centric re-update (OC-SORT) for nonlinear motion and occlusion gaps",
+    "how_it_applies": "OC-SORT corrects Kalman error accumulated during occlusion by using detector observations to build a virtual trajectory across the gap. A 2025 study on fast tiny objects found DeepOCSORT had ADE 31.15 px versus ByteTrack's 114.3 px (ByteTrack fastest). For Robo Scout, this suggests replacing or augmenting ByteTrack-style IoU association for balls with an OC-SORT-style or DeepOCSORT-style tracker, and gap-filling with the same virtual-trajectory idea.",
+    "evidence": "https://arxiv.org/abs/2203.14360 (OC-SORT, CVPR 2023, code https://github.com/noahcao/OC_SORT); https://arxiv.org/html/2509.18451v1 (Kalman trackers on fast tiny objects, ADE numbers from search snippet)",
+    "effort": "medium"
+   },
+   {
+    "method": "Appearance (ReID) association for identity, since IoU-only trackers swap IDs among similar objects",
+    "how_it_applies": "Sources say ByteTrack relies only on IoU matching and gets more ID switches when objects overlap or are occluded. BoT-SORT adds a ReID appearance term plus Gaussian-based matching. For Robo Scout's identity swaps between similar robots, an appearance term (bumper color or team-number crop embedding) inside the association step should reduce swaps. Caveat: appearance is often unreliable on very small targets, so use it only for robot-scale boxes, not balls.",
+    "evidence": "BoT-SORT via search summary (arXiv/benchmark snippet, no direct figure); ByteTrack IoU weakness per https://arxiv.org/pdf/2407.17521 (CORT, class-oriented tracking) snippet; Basketball-SORT for occlusion between same-looking players https://arxiv.org/pdf/2406.19655 (PDF not extractable; cited by title only, unverified)",
+    "effort": "medium"
+   },
+   {
+    "method": "Gap-filling in tracks: linear or GSI interpolation, or learned masked-imputation of missing trajectory points",
+    "how_it_applies": "The SoccerNet 2023 MOT4MOT report linearly interpolates missing detections, and another team uses GSI interpolation plus a learned link model. A learned imputation approach masks ground-truth ball points and trains a model to fill them. For Robo Scout, these could recover single-ball trajectories through the Hive Cell instead of the current 1 of many entries detected.",
+    "evidence": "https://arxiv.org/pdf/2308.16651 (SoccerNet 2023 MOT4MOT, 3rd place); ball imputation https://arxiv.org/pdf/2306.08206 (Set Transformer + Bi-LSTM ball trajectory inference)",
+    "effort": "small"
+   },
+   {
+    "method": "Robot-path mapping pipelines and FRC datasets exist, but no open-source FRC shot/scoring counter was found",
+    "how_it_applies": "Searches found no FRC project that counts game pieces or hive scores from video, and no paper on FRC game-piece scouting. Roboflow Universe has FRC robot-detection and game-piece datasets (e.g., https://universe.roboflow.com/ctrlz-4096/frc-game-piece, description unverified). Team 1706's vision2015 repo is robot-side, not match-video. The Statbotics/TBA search found no video-based piece counting. The FTC docs note OpenCV color blob detection as a simpler alternative for colored pieces, which matches Robo Scout's color-blob launch scanner.",
+    "evidence": "https://blog.roboflow.com/robot-path-mapping/ ; https://universe.roboflow.com/frc-robot-tracking/frc-robot-detection-reefscape ; https://github.com/rr1706/vision2015 ; https://ftc-docs.firstinspires.org/en/latest/programming_resources/vision/vision_overview/vision-overview.html",
+    "effort": "small"
+   }
+  ],
+  "recommendation": "Rank fixes by the stated problems. (1) Ball recall: run the existing YOLO ball detector with SAHI-style tiled inference (or slice-assisted training per YOLOv8-SMOT) so the ~10 px Pollen balls are detected. (2) Hive entries: replace per-frame ball-in-cell detection with a TOTNet-style occlusion-aware multi-frame model trained on Robo Scout's labeled matches (occlusion masking augmentation + visibility-weighted loss), and fill gaps with GSI or linear interpolation on tracks. (3) Identity: move robot tracking from IoU-only association to an OC-SORT or BoT-SORT-style tracker with a bumper-color or team-number appearance term, and anchor the robot tracks to bumpers rather than full robots. (4) Keep the color-blob launch scanner as the cheap baseline. Caveat: no source tested these on FRC footage; TOTNet and TrackNet numbers come from table tennis and tennis."
+ },
+ {
+  "topic": "Team number / jersey number OCR for robot identity (PARSeq, SoccerNet jersey pipelines)",
+  "findings": [
+   {
+    "method": "PARSeq scene-text recognizer applied to jersey numbers, frame-level reads then tracklet-level aggregation",
+    "how_it_applies": "Read the printed team number on each robot's bumper/body crop per frame with PARSeq (or a fine-tuned copy), then aggregate reads over a robot track. This gives a direct identity signal that does not depend on the per-team YOLO classifier (87% roster accuracy). Use the aggregated number as an identity anchor and re-anchor tracks whenever a confident read appears, which addresses track-ID swaps between similar robots.",
+    "evidence": "Koshkina & Elder 2024, 'A General Framework for Jersey Number Recognition in Sports Video', https://arxiv.org/html/2405.13896v1 (PARSeq-based detection, localization, frame-level recognition; reported 91.4% on hockey images and 87.4% on soccer tracklets, per search snippet; full paper not opened). PARSeq: Bautista & Atienza, ECCV 2022, arXiv 2207.06966, reference code https://github.com/baudm/parseq (pretrained parseq-tiny/parseq variants available, PyTorch Hub).",
+    "effort": "medium"
+   },
+   {
+    "method": "Legible-frame classifier before aggregation (keep only frames where the number is readable, then vote or average)",
+    "how_it_applies": "Robo Scout's frames are small (team numbers likely tens of pixels at 1280x720). Train or use a simple legibility/confidence gate on each crop and only vote with frames above threshold. The 2024 paper found simpler aggregation competitive once legible frames are selected, so a confidence-weighted majority vote over a track is a cheap first version.",
+    "evidence": "arXiv 2405.13896 (classifier flags legible frames, then aggregates; simpler aggregation methods competitive, per search snippet). Balaji et al. 2023 keyframe identification, arXiv 2309.06285, https://arxiv.org/pdf/2309.06285 (keyframe module gave reported 37.8% and 37.7% accuracy gains on two domain-gap test sets, per snippet).",
+    "effort": "small"
+   },
+   {
+    "method": "Torso/number-region localization with keypoints or a detector before OCR, plus restoration and confidence-weighted ensemble",
+    "how_it_applies": "Crop the team-number region first (a small YOLO detector trained on a few hundred labeled crops, or a fixed offset from the robot box), optionally upscale or restore, then run OCR. A 2025-era pipeline reportedly restored inputs and ensembled PARSeq with vision-language models using confidence weighting, improving tracklet accuracy over baseline. Relevant because a team-number read is more reliable than the roster classifier alone.",
+    "evidence": "SoccerNet 2025 Challenges Results, arXiv 2508.19182, https://arxiv.org/pdf/2508.19182 (torso extraction then PARSeq OCR). UBC Okanagan ensemble paper described in search results only; source URL not captured, so treat as unverified.",
+    "effort": "medium"
+   },
+   {
+    "method": "SoccerNet jersey number benchmark and sn-jersey tooling as labeled-data and evaluation reference",
+    "how_it_applies": "SoccerNet 2023 defines tracklet-level jersey number recognition (2853 training/test tracklets, hidden challenge set; top reported 92.85%). The sn-jersey repo can supply the evaluation protocol and training code for a tracklet-level metric. Robo Scout can adopt the tracklet-level accuracy metric to measure identity fixes per robot.",
+    "evidence": "SoccerNet 2023 Challenges Results, arXiv 2309.06006, https://arxiv.org/abs/2309.06006; sn-jersey repo https://github.com/SoccerNet/sn-jersey (per search snippets).",
+    "effort": "small"
+   },
+   {
+    "method": "Single-stage digit-compositional classifier with uncertainty (alternative to PARSeq)",
+    "how_it_applies": "If a fixed set of team numbers exists (the roster), a closed-set classifier over the roster with Dirichlet uncertainty can run cheaper than a full sequence recognizer and abstain when unsure, which fits Robo Scout's closed roster. Reported 85.62% tracklet accuracy on the SoccerNet challenge benchmark.",
+    "evidence": "CVPR 2025 sports workshop single-stage uncertainty-aware method, https://cvpr.thecvf.com/virtual/2025/35507 (only the search snippet was seen; the exact paper title was not captured).",
+    "effort": "medium"
+   }
+  ],
+  "recommendation": "Add a per-frame PARSeq read of the team number on each robot crop, gate on legibility or confidence, and aggregate by confident-vote per track; use a confident read to re-anchor the robot's identity whenever it appears. Ground truth for evaluation: SoccerNet-style tracklet-level accuracy on your ~20 labeled videos. Caveat: all numbers here come from search snippets and abstracts; the full papers were not read, and the FTC team-number visibility on robots in this broadcast view has not been checked."
+ },
+ {
+  "topic": "Temporal action spotting for Robo Scout: SoccerNet action spotting, E2E-Spot, T-DEED, feasibility with ~20 labeled matches",
+  "findings": [
+   {
+    "method": "E2E-Spot: end-to-end trained frame encoder plus temporal head for precise event timestamps",
+    "how_it_applies": "Robo Scout's shot-release and Hive-entry events are single-timestamp events in long untrimmed video, the exact task E2E-Spot targets. Its key claim is that training the frame feature extractor end-to-end with the spotting head beats two-stage pipelines (frozen features, then a separate classifier), which is close to the current frame-difference plus per-frame detector plus logistic-classifier stack. The paper says it trains quickly on a single GPU, relevant for Apple Silicon. The jhong93/spot README says it expects pre-extracted frames at about 224 px high, laid out as video/frame.jpg, and gives the training command train_e2e.py <dataset> <frame_dir> -s <save_dir> -m <arch>. It lists datasets tennis, fs_comp, fs_perf, finediving, finegym, soccernetv2 and soccernet_ball, and does not mention MPS or CPU support, so porting is a risk.",
+    "evidence": "Hong et al., Spotting Temporally Precise, Fine-Grained Events in Video, ECCV 2022, https://arxiv.org/abs/2207.10213 (abstract: compact end-to-end model, trains quickly on a single GPU, outperforms recent baselines). Code: https://github.com/jhong93/spot (README fetched). Second-place 2022 SoccerNet challenge result taken from search snippet, not verified in the paper body.",
+    "effort": "medium"
+   },
+   {
+    "method": "T-DEED: temporal-discriminability encoder-decoder with full-resolution multi-scale output for precise spotting",
+    "how_it_applies": "T-DEED targets three problems that match Robo Scout's failure modes: adjacent frames that look nearly identical (the ball is about 10 px and moves little per frame), the need for output at full temporal resolution to hit tight timing tolerances, and events with different dynamics at several time scales. Its ablation (FS-Comp, delta=1 mAP) shows SGP-Mixer with skip connections at 77.96 vs 74.29 with no skips, and GSF in the back half of the backbone is best. Clip length 100 frames was best (81.25) vs 25 frames (71.02). Soft-NMS over 50%-overlapping clips beat plain NMS (85.15 vs 81.27). Tuned recipe: AdamW, base LR 8e-4, 3 warmup epochs, cosine decay, 50 epochs, batch 8 clips, 5000 clips per epoch, weighted cross-entropy (w=5) plus MSE for displacement, mixup alpha=0.2. Directly relevant to the lost-mid-air and missed-entry problems: overlapping clips with a temporal encoder-decoder can recover events whose trajectory breaks in one frame window. T-DEED won 1st place in the 2024 SoccerNet Ball Action Spotting challenge per search snippet from the revised paper, a sports setting with a small ball. That claim was not verified in the paper body.",
+    "evidence": "Xarles et al., T-DEED, arXiv:2404.05392 (v2 HTML read: https://arxiv.org/html/2404.05392v2 ; abstract https://arxiv.org/abs/2404.05392). Code: https://github.com/arturxe2/T-DEED. Challenge result: SoccerNet 2024 Challenges Results https://arxiv.org/pdf/2409.10587 (search snippet only).",
+    "effort": "medium"
+   },
+   {
+    "method": "Feasibility with ~20 labeled matches: spotting heads on frozen or lightly tuned pretrained backbones with sparse labels",
+    "how_it_applies": "The papers' training sets are small and label density is sparse. FigureSkating has 11 videos, 371 performances, and annotations on about 0.23% of frames. FineDiving has 3,000 clips with about 2.2% of frames annotated. So a spotting head trained on roughly 20 matches' worth of per-launch labels is in a plausible regime, but the paper does not state a minimum training-set size, so this is inference. Ways to reduce risk: start from T-DEED or E2E-Spot pretrained weights where available, augment with the public SoccerNet Ball data, and use the delta=1 and delta=2 frame tolerance metrics for evaluation so timing gains are measurable. A held-out match split is needed because the reported numbers are on public benchmarks. The 20-match dataset is too small to train the full backbone from scratch, which is consistent with the papers' use of pretrained RegNetY features.",
+    "evidence": "FigureSkating and FineDiving dataset sizes and annotation density from T-DEED v2 HTML (https://arxiv.org/html/2404.05392v2). Metrics delta=1 and delta=2 from same source.",
+    "effort": "small"
+   },
+   {
+    "method": "SoccerNet action spotting as the benchmark family; ball action spotting challenge as a reference point",
+    "how_it_applies": "SoccerNet defines action spotting as localizing an action with one timestamp in untrimmed video, and has a dedicated ball action spotting track that is closest to small-object events. Using SoccerNet-Ball as an external pretraining or validation source for the spotting head is the most realistic way to get more labeled timing data beyond 20 matches. OSL-ActionSpotting is a unified library that re-implements E2E-Spot and other spotting methods, and can serve as a reference to check the port against.",
+    "evidence": "SoccerNet 2024 challenges results https://arxiv.org/pdf/2409.10587 ; review https://arxiv.org/pdf/2410.01304 (PDF not readable by the fetch tool, not used for specific claims) ; OSL-ActionSpotting https://arxiv.org/html/2407.01265v1 (search snippet only).",
+    "effort": "medium"
+   }
+  ],
+  "recommendation": "Replace the current per-frame-detector-plus-logistic-classifier shot and entry logic with a T-DEED or E2E-Spot style spotting head: per-frame features from a pretrained backbone, overlapping 100-frame clips with the SGP-style encoder-decoder kept at full temporal resolution, and Soft-NMS over the overlapping windows. Train it on the ~20 labeled matches plus SoccerNet-Ball, evaluate with delta=1 and delta=2 frame tolerances on held-out matches, and port the CUDA-oriented jhong93/spot or arturxe2/T-DEED code to MPS, checking the port against OSL-ActionSpotting."
+ },
+ {
+  "topic": "Motion-based small object detection (frame differencing, MOG2/KNN, optical flow, motion+color+CNN verifier) for fast small balls in Robo Scout",
+  "findings": [
+   {
+    "method": "TrackNet: heatmap CNN for tiny fast balls, frame-stacked input (640x360), Gaussian-target heatmap, threshold 128; trajectory-aware via consecutive frames",
+    "how_it_applies": "Robo Scout's YOLO ball detector misses fast/blurred balls. A frame-stacked heatmap network learns ball trajectory cues and can recover the ball when single-frame detection fails. Reports tennis F1 84.3% (10-fold CV), 98.5% on one final. Could replace or verify YOLO26 ball detections using 3 consecutive frames.",
+    "evidence": "Huang et al., TrackNet, arXiv 1907.03698, https://arxiv.org/abs/1907.03698 (fetched abstract page)",
+    "effort": "medium"
+   },
+   {
+    "method": "TrackNetV4 motion-aware fusion: absolute frame-difference maps |I_t - I_{t-1}| modulated by a learnable motion prompt layer, fused with visual features via motion attention; plug-and-play on TrackNetV2/V3",
+    "how_it_applies": "Direct template for adding a motion channel to Robo Scout's ball detector: compute frame differences in the launch/cell region, feed them as an extra attention input so balls that differ from the static background are emphasized. Paper gives no numeric gains in the abstract, so validate on the 20 labeled videos.",
+    "evidence": "TrackNetV4, arXiv 2409.14543, https://arxiv.org/abs/2409.14543 (fetched); abstract-level results only",
+    "effort": "medium"
+   },
+   {
+    "method": "TrackNetV5 Motion Direction Decoupling: frame differencing that keeps the sign/direction (plain absolute difference discards sign), claimed to approximate optical-flow directional clarity at frame-differencing cost",
+    "how_it_applies": "Balls rising into the Hive Cell from below have a consistent upward direction; signed motion cues would separate rising launches from static robots and background clutter. Only seen in search snippets of arXiv 2512.02789 (unverified in full).",
+    "evidence": "arXiv 2512.02789 (v2/v3), https://arxiv.org/abs/2512.02789 (search snippet only, not fully read)",
+    "effort": "medium"
+   },
+   {
+    "method": "FMO (Fast Moving Object) streak detection and trajectory fitting: model a fast object as a semi-transparent streak over exposure; detector, redetector, tracker pipeline; 16-video FMO dataset; existing trackers judged inadequate",
+    "how_it_applies": "Balls moving more than their own size per frame (Pollen ~10 px at launch speed, 60 fps) appear as streaks. Treating a launch as a streak-trajectory fit can recover shots that a per-frame detector breaks up mid-air, which matches the 'ball paths lost mid-air' failure. Reconstructing the path as one object across gaps is the key idea for counting shots.",
+    "evidence": "Rozumnyi et al., The World of Fast Moving Objects, CVPR 2017, https://openaccess.thecvf.com/content_cvpr_2017/html/Rozumnyi_The_World_of_CVPR_2017_paper.html and arXiv 1611.07889",
+    "effort": "large"
+   },
+   {
+    "method": "FMODetect: learned detection of fast moving objects via a matting-and-fitting network (estimates blurred appearance without background and fits trajectory) trained on synthetic data, plus energy-minimization deblurring; claims higher recall/precision than prior methods, real-time",
+    "how_it_applies": "Synthetic-data training of a streak/trajectory detector could be a way to get more labeled motion examples than the ~20 labeled videos. Speed and metric claims are vague on the page, so treat as directional.",
+    "evidence": "Rozumnyi et al., FMODetect, ICCV 2021, arXiv 2012.08216, https://arxiv.org/abs/2012.08216 (fetched abstract page)",
+    "effort": "large"
+   },
+   {
+    "method": "MOG2 (Zivkovic 2004 adaptive GMM) background subtraction, OpenCV cv::createBackgroundSubtractorMOG2(history, varThreshold, detectShadows); a forum report says plain absdiff against a background beat MOG/MOG2 for a small drone",
+    "how_it_applies": "Use as a cheap candidate generator in a fixed camera scene (the broadcast camera is fixed), with shadows disabled and a short history so a fast ball stays foreground; prefer a frame-difference or absdiff baseline first since MOG2 absorbs slow-moving or stationary balls into background. Benchmark against absdiff on the 20 videos.",
+    "evidence": "Zivkovic, Improved adaptive GMM for background subtraction, ICPR 2004, https://dare.uva.nl/id/5655e0ce-f18f-471f-af8a-153f45565e51; OpenCV MOG2 docs https://docs.opencv.org/4.x/d7/d7b/classcv_1_1BackgroundSubtractorMOG2.html; OpenCV forum https://answers.opencv.org/question/181336/improve-opencv-background-subtraction/",
+    "effort": "small"
+   },
+   {
+    "method": "RAFT dense optical flow (Teed and Deng, ECCV 2020; all-pairs correlation with iterative refinement; official code github.com/princeton-vl/RAFT) as a motion mask/feature source",
+    "how_it_applies": "Accurate but heavy for a 60 fps full-frame pipeline on Apple Silicon MPS; more practical to compute flow only in a cropped region of interest around the Hive Cell and launch zones, or use Farneback (OpenCV, cheaper) for candidate motion. Flow magnitude plus direction gives a launch-direction feature for the shot classifier.",
+    "evidence": "Teed and Deng, RAFT, ECCV 2020, arXiv 2003.12039, https://arxiv.org/abs/2003.12039",
+    "effort": "medium"
+   },
+   {
+    "method": "Two-stage motion-candidate then CNN verifier: frame differences or AND-combined differences, filter connected components by size/shape/aspect ratio, then a CNN classifies each candidate; classical FMO-style pipelines and TrackNet-family work use this pattern",
+    "how_it_applies": "Most direct fix for missed shots: generate motion blobs (absdiff/MOG2 mask) and color-filter them for Pollen/Nectar hues, keep components of ball size (~10 px), then verify with the existing YOLO26 ball classifier or the trajectory-feature logistic model. Recovers balls YOLO misses while limiting false positives from robots and the score overlay.",
+    "evidence": "TrackNet arXiv 1907.03698 (AND-combined differences plus shape/size filter); arXiv 2003.03856 baseball tracking (thresholded difference with minimum connected-component area), https://arxiv.org/pdf/2003.03856; PMC8124271 YOLOv3 small fast ball detection, https://pmc.ncbi.nlm.nih.gov/articles/PMC8124271",
+    "effort": "small"
+   }
+  ],
+  "recommendation": "Build a motion-candidate stage before the YOLO ball detector: MOG2 (shadows off, short history) or absdiff on a fixed-camera ROI, intersected with a color mask for Pollen/Nectar and filtered to ~10 px blobs. Feed candidates and a 3-frame signed frame-difference stack into a TrackNet-style verifier (or the existing YOLO26 classifier) and link detections into per-launch streaks for trajectory fitting, so a launch is one object across gaps. Validate on the 20 labeled videos; treat TrackNetV4/V5 gains and FMODetect speed claims as unverified until checked against full papers."
+ },
+ {
+  "topic": "Training and inference for very small objects (~10 px balls) with Ultralytics YOLO11/YOLO26: SAHI, tiling, imgsz, P2 head, anchor-free settings",
+  "findings": [
+   {
+    "method": "Ultralytics built-in tile argument (replaces the SAHI integration for training, validation and prediction)",
+    "how_it_applies": "Robo Scout balls are ~10 px in a 1280x720 frame. Running at imgsz=640 downsamples by 2x, leaving ~5 px objects. tile=True processes overlapping windows at native resolution before resizing, so balls keep detail. Use model.train(..., tile=True, imgsz=640) to create training tiles with clipped labels (negative windows kept), and predict with tile=True to get one Results per original frame. Caveat: tiling drops global context and adds forward passes, so verify on the labeled match videos (especially the Hive cell and robot-level behavior, which need context).",
+    "evidence": "https://docs.ultralytics.com/guides/high-resolution-tiling (tile argument; training example model.train(data='aerial.yaml', tile=True, imgsz=640); caveats on forward passes and lost global context)",
+    "effort": "small"
+   },
+   {
+    "method": "SAHI sliced inference with AutoDetectionModel (ultralytics model_type), inference-only, no retraining",
+    "how_it_applies": "Slices a 1280x720 frame into overlapping tiles, runs YOLO per tile, merges boxes. This is a cheap way to test whether the existing YOLO26 ball detector recovers missed small balls without retraining. Ultralytics docs use 256 px or 512 px slices with 0.2 overlap in examples. The Ultralytics SAHI guide itself is now marked deprecated in favor of tile, so use SAHI as an external baseline/comparison rather than the primary path. The sahi tool supports YOLO26 and sahi predict --model_type ultralytics.",
+    "evidence": "https://docs.ultralytics.com/guides/sahi-tiled-inference (deprecation banner; slice 256/overlap 0.2 examples; AutoDetectionModel usage); https://obss.github.io/sahi/guides/models/ and https://github.com/obss/SAHI (SAHI compatible-model list incl. Ultralytics YOLOv8/YOLO11/YOLO26)",
+    "effort": "small"
+   },
+   {
+    "method": "Original SAHI paper: inference-time slicing and slicing-aware fine-tuning",
+    "how_it_applies": "Reports AP gains on VisDrone and xView: inference-only slicing +6.8% (FCOS), +5.1% (VFNet), +5.3% (TOOD); adding slicing-aware fine-tuning raised the cumulative gain to 12.7%, 13.4%, 14.5%. Supports the plan to fine-tune on sliced crops of the labeled videos, not just slice at inference. Gains are for aerial datasets, so they are an expectation, not a guarantee for 10 px balls.",
+    "evidence": "https://arxiv.org/abs/2202.06934 (Akyon, Altinuc, Temizel, ICIP 2022; abstract numbers)",
+    "effort": "medium"
+   },
+   {
+    "method": "Evaluation of YOLOv5/YOLOX with sliced inference on VisDrone",
+    "how_it_applies": "Sliced inference increased AP50 in all experiments, larger gain for YOLOv5 than YOLOX; sliced fine-tuning added further gains. Top result YOLOv5-L AP50 48.8 on VisDrone2019Det test-dev. Paper does not report full-image baselines or latency, so use it only as directional evidence.",
+    "evidence": "https://arxiv.org/abs/2203.04799",
+    "effort": "small"
+   },
+   {
+    "method": "YOLO26 P2 detection head (yolo26-p2.yaml)",
+    "how_it_applies": "Adds a stride-4 P2 head for small objects. Important: no pretrained yolo26*-p2.pt weights are released. Build from the YAML and transfer from yolo26n.pt (Ultralytics guide: Train a YOLO26 P2 Model from Pretrained Weights). Stride-4 features help 10 px objects, but cost compute and memory at 1280-class input, so pair it with tile or a higher imgsz and check MPS speed. A third-party 2026 paper (SDD-YOLO) applies P2 with YOLO26-style components to sub-16 px UAV targets, which is directly analogous.",
+    "evidence": "https://docs.ultralytics.com/models/yolo26/ (yolo26-p2.yaml; 'No scale-specific yolo26*-p2.pt ... weights are released'); https://arxiv.org/html/2603.25218v1 (SDD-YOLO, P2 at 4x downsampling for sub-16 px)",
+    "effort": "medium"
+   },
+   {
+    "method": "YOLO26 small-object training features: STAL and ProgLoss",
+    "how_it_applies": "Docs describe STAL (Small-Target-Aware Label Assignment) to improve positive label coverage for small objects and Progressive Loss (ProgLoss) shifting emphasis toward the inference head. These are built in, so no custom code is needed. Verify the effect with per-class recall on ball crops rather than assuming it.",
+    "evidence": "https://docs.ultralytics.com/models/yolo26/",
+    "effort": "small"
+   },
+   {
+    "method": "imgsz choice",
+    "how_it_applies": "Ultralytics YOLO26 docs give no small-object imgsz recommendation and use 640 as the default example. For ~10 px balls, 640 full-frame loses too much detail (about 5 px). Test imgsz 960 or 1280 at full-frame, or tile, rather than relying on 640. Cost scales roughly with pixel count, so 1280 is about 4x the 640 compute.",
+    "evidence": "https://docs.ultralytics.com/models/yolo26/ (imgsz benchmarks listed; no small-object guidance); arithmetic from 1280x720 source resolution",
+    "effort": "small"
+   }
+  ],
+  "recommendation": "For Robo Scout, the highest-value and lowest-cost change is to stop running the ball detector at imgsz=640 on the full 1280x720 frame, which shrinks 10 px balls to about 5 px. First, benchmark the existing YOLO26 ball detector with inference-only tiling (Ultralytics predict with tile=True at imgsz 640, or SAHI with ~256-512 px slices and 0.2 overlap) against the current baseline on a few labeled matches, measuring per-ball recall. Second, retrain the ball detector with tile=True on the labeled videos (keep negative windows) so it learns from native-resolution crops, and test whether the yolo26-p2.yaml P2 head (built from YAML, initialized from yolo26n.pt, since no P2 weights exist) adds recall at acceptable MPS speed. Keep the robot/identity models at full frame, because tiling drops global context. Expected gains are directional: the cited SAHI results are +5 to +7% AP inference-only on aerial data, and +12 to +15% with slicing-aware fine-tuning, not measured on balls. Measure against the full-frame baseline on held-out matches before committing."
+ },
+ {
+  "topic": "Kalman filter and physics-based (parabolic) trajectory tracking for small balls through occlusion and missed detections; gating, track birth/death, fragment linking",
+  "findings": [
+   {
+    "method": "Constant-velocity Kalman filter with coasting through missed detections (predict-only, no correction), with process noise inflated as the occlusion lengthens",
+    "how_it_applies": "Robo Scout loses ball paths mid-air. Keep each ball track alive by predicting forward with no update during misses, and cap the coast length so the prediction horizon cannot diverge. Tune Q/R per scenario, since the paper reports they are not given numerically and must be tuned.",
+    "evidence": "https://arxiv.org/html/2509.18451v1 (analysis of KF trackers for fast tiny objects; notes Q/R must be tuned per scenario). Occlusion skip-update and adaptive Q inflation described in search summaries of arXiv 2603.09783 (LiDAR UAV tracker, reinitializes after a fixed number of missed steps to bound the prediction horizon).",
+    "effort": "small"
+   },
+   {
+    "method": "Warning on linear KF for balls: constant-velocity KF fails on fast, non-linear balls",
+    "how_it_applies": "The same paper reports that linear constant-velocity KF trackers (DeepOCSORT, OCSORT, StrongSORT, BoTSORT, ByteTrack) give average displacement errors of roughly 20 to 215 px on a fast racquetball task, and failure modes include direction changes, bounces and motion blur. A plain KF will not fix Robo Scout alone. Ballistic segments need a physics model, not a linear one.",
+    "evidence": "https://arxiv.org/html/2509.18451v1 (ADE/AMD table; ByteTrack 39 to 215 px, DeepOCSORT 20 to 50 px across four scenarios). Note the paper also has a unit inconsistency between its abstract and its 1 px = 0.026 cm calibration, so use the table values only as relative comparisons.",
+    "effort": "small"
+   },
+   {
+    "method": "Piecewise parabolic (gravity-constrained) trajectory model fit with RANSAC over short windows, with segmentation at discontinuities",
+    "how_it_applies": "Fit y(t) and x(t) as quadratic or linear in time per segment, optionally fixing vertical acceleration to gravity in image units (a per-camera scale or homography is needed, since the side view is not metric). RANSAC over small subsets of ball detections rejects false detections such as the yellow Pollen confusion. Break segments at launch, at the cell contact, and at settling. This gives a robust per-launch trajectory, and the parabola can bridge gaps that a Kalman filter cannot.",
+    "evidence": "https://arxiv.org/pdf/1905.03633 (Intra-frame Object Tracking by Deblatting: RANSAC finds linear and quadratic segments, joined into a piecewise trajectory, quadratic for gravity and breaks for bounces). US Patent 11138744 and US 12478848 (fix gravity at -9.8 m/s^2 to reduce unknowns; fit only in-air heights). US 12154284 (sample small subsets of 2D detections, fit a curve, keep the one with most inliers, robust to detector errors).",
+    "effort": "medium"
+   },
+   {
+    "method": "Mahalanobis-distance gating on the Kalman predicted position, instead of IoU gating, before assignment",
+    "how_it_applies": "IoU between boxes of about 10 px is very brittle, and SORT's IoU gate is designed for larger boxes. Gate each candidate detection with squared Mahalanobis distance from the predicted position using the innovation covariance, against a chi-square threshold. This is the usual gate in trackers, and it suits small fast objects better than IoU. Robo Scout's per-robot identity problem could also use gated candidates, with the identity model used only inside the gate.",
+    "evidence": "Mahalanobis gating summarized in search results for arXiv 2603.09783 (accept a candidate only if its squared Mahalanobis distance from the predicted measurement falls below a threshold). SORT's IoU+Hungarian baseline: https://arxiv.org/pdf/1602.00763 and https://github.com/abewley/sort (notes it does not handle occlusion or re-entering objects). The SORT abstract page itself was fetched but did not give the gate details.",
+    "effort": "small"
+   },
+   {
+    "method": "Two-stage association that keeps low-confidence detections (ByteTrack) to recover occluded or faint balls",
+    "how_it_applies": "Match high-score detections to tracks first, then match the leftover tracks against low-score detections, which are often the occluded or motion-blurred ball. Unmatched low-score boxes are discarded. This directly targets ball path loss mid-air and reduces missed shots.",
+    "evidence": "https://arxiv.org/abs/2110.06864 (ByteTrack: uses low-score detections, similarity to tracklets recovers occluded objects, filters background. MOT17 test: MOTA 80.3, IDF1 77.3, HOTA 63.1, 30 FPS on V100). The abstract says the association step improved IDF1 by 1 to 10 points when added to nine other trackers.",
+    "effort": "small"
+   },
+   {
+    "method": "Track birth confirmation and death rules: confirm a track after M consecutive hits, delete after N consecutive misses (SORT probation and max_age)",
+    "how_it_applies": "Stops false yellow-ball births from the frame-difference scanner from becoming shots, and ends a ball track when it settles inside or below the Cell. Use min_hits around 3 and a max-age tuned to the expected flight time in frames at 60 fps (flights are short, so a few tens of frames of coasting is plausible; this value is a guess to tune, not a sourced number).",
+    "evidence": "Confirmation after 3 consecutive matched detections (KF_MIN_HITS = 3): summary of a search result on Kalman tracking of tiny objects (https://arxiv.org/html/2509.18451v1 and linked tracking papers). SORT probation and max_age termination: https://arxiv.org/pdf/1602.00763 (the abstract page did not give the numbers).",
+    "effort": "small"
+   },
+   {
+    "method": "Physics-guided kinematic tracking with an outlier and missed-detection module for fast small objects",
+    "how_it_applies": "A 2025 approach integrates kinematic motion equations and an outlier detection and correction module, and reports up to 70% lower average displacement error than KF trackers on a racquetball dataset. The model equations were not visible in the abstract, so the design should be checked in the full paper before copying it. It is the closest published analogue to Robo Scout's ballistic-ball problem.",
+    "evidence": "https://arxiv.org/abs/2510.20126 (Physics-Guided Fusion for Robust 3D Tracking of Fast Moving Small Objects; abstract only, full text not read).",
+    "effort": "medium"
+   },
+   {
+    "method": "Learned physics priors for ball trajectory reconstruction from 2D tracks",
+    "how_it_applies": "A learned model trained on simulated physics predicts a height per 2D point so the reconstruction matches the input track. It avoids hand-tuned segmentation, but it needs simulated training data and is a larger change than the other methods.",
+    "evidence": "https://arxiv.org/html/2506.05763v1 (Where Is The Ball: 3D Ball Trajectory Estimation From 2D Monocular Tracking).",
+    "effort": "large"
+   }
+  ],
+  "recommendation": "Replace the per-frame frame-to-frame linker with a ballistic track model. For each candidate ball track, use a Kalman or RANSAC-fit parabola with a gated (Mahalanobis, not IoU) assignment, two-stage association that keeps low-confidence detections (ByteTrack), coasting through misses with a bounded horizon, and birth/death by M-of-N hits and max-age. Link fragments by fitting one parabola across a gap between one track's end and another's start, and accept the link only if the fitted launch and apex are physically consistent. Count a Hive Cell entry from the fitted trajectory intersecting the cell region, not from a per-frame box. Verify the gravity fit and gate thresholds on the ~20 labeled videos, since none of the sources reports numbers for this domain."
+ },
+ {
+  "topic": "Video clip classification for made/miss or shot/no-shot: X3D, VideoMAE, SlowFast, small 3D CNNs on short crops; data needs and Apple Silicon feasibility",
+  "findings": [
+   {
+    "method": "X3D (Expanding Architectures for Efficient Video Recognition) as the default small 3D CNN for short-crop clip classification",
+    "how_it_applies": "Robo Scout's shot clips are short crops around a launch or Hive Cell region, so an efficient 3D CNN fits. X3D-XS/S are the cheapest variants (PyTorchVideo table lists X3D-XS ~0.91 GFLOPs/view, X3D-S ~2.96 GFLOPs/view, both ~3.8M params, 3 spatial x 10 temporal views). A clip classifier could be fine-tuned from Kinetics-400 weights on the ~20 labeled matches with per-launch reviews, using a 2-class head (made/miss) or 2-class shot/no-shot head. Original paper reports X3D-M is comparable to SlowFast 4x16 R50 on AVA at about 5.8x fewer FLOPs, so the efficiency argument is primary-sourced.",
+    "evidence": "https://arxiv.org/pdf/2004.04730 (X3D paper); https://pytorchvideo.readthedocs.io/en/stable/model_zoo.html (PyTorchVideo model zoo table); https://arxiv.org/pdf/2111.09887 (PyTorchVideo library paper, X3D-L 77.4 top-1 Kinetics-400, 26.6x3x10 GFLOPs, 6.2M params); https://pytorch.org/hub/facebookresearch_pytorchvideo_x3d/ (torch hub loading)",
+    "effort": "small"
+   },
+   {
+    "method": "SlowFast two-pathway 3D CNN as a heavier alternative when temporal context matters (long trajectories, rising-into-cell motion)",
+    "how_it_applies": "SlowFast pairs a slow pathway (low frame rate, spatial semantics) with a fast pathway (high frame rate, motion). For a 60 fps broadcast, the fast path can capture rapid ball motion near launch. It costs more than X3D, so it is a second-tier option if X3D underfits on the trajectory-heavy shot class. Reported Kinetics-400 result: 79.8 top-1 for SlowFast 16x8 R101+NL; Charades 42.1 mAP vs 39.0 for Slow-only baseline (values from the paper; Kinetics-600 81.8 and AVA 28.3 were from secondary text and should be verified in the full paper).",
+    "evidence": "https://arxiv.org/pdf/1812.03982 (SlowFast Networks for Video Recognition, Feichtenhofer et al., ICCV 2019); https://openaccess.thecvf.com/content_ICCV_2019/html/Feichtenhofer_SlowFast_Networks_for_Video_Recognition_ICCV_2019_paper.html; https://github.com/facebookresearch/SlowFast/blob/master/MODEL_ZOO.md",
+    "effort": "medium"
+   },
+   {
+    "method": "VideoMAE self-supervised video transformer, fine-tuned on a small labeled set",
+    "how_it_applies": "VideoMAE uses masked autoencoding with tube masking at 90-95% ratio and is explicitly positioned for small datasets (paper reports strong results on datasets of around 3k-4k videos without extra data). Relevant to Robo Scout because only ~20 labeled matches exist. Caveat: ViT-B/L backbones are heavier than X3D-S; the paper's own Kinetics-400 numbers are 83.9 (v1) and 87.4 (v3) for the vanilla ViT, so cite the version used. Plausible plan: start from a public VideoMAE checkpoint and fine-tune only the head or last blocks on clip crops; expect higher cost on MPS than X3D-S.",
+    "evidence": "https://arxiv.org/pdf/2203.12602 (VideoMAE, Tong et al., NeurIPS 2022); https://nips.cc/virtual/2022/poster/54362; code https://github.com/MCG-NJU/VideoMAE",
+    "effort": "large"
+   },
+   {
+    "method": "Apple Silicon (MPS) feasibility check for Conv3d before committing to any 3D CNN",
+    "how_it_applies": "Conv3d on MPS has historically failed (RuntimeError 'Conv3D is not supported on MPS' and NotImplementedError aten::slow_conv3d_forward reports); PyTorch MPS op-coverage issue #77764 lists nn.Conv3D as requested. Newer reports suggest a Conv3D smoke test passes on recent PyTorch (a forum post cites PyTorch 2.13 MPS convolution), but this is unverified. PYTORCH_ENABLE_MPS_FALLBACK=1 can route unsupported ops to CPU at a speed cost, and transposed Conv3d was reported separately as failing. Action: run a one-line Conv3d and ConvTranspose3d test on the installed torch version before designing around X3D/SlowFast on MPS. If it fails, a 2D-per-frame encoder with a small temporal head (frame-stack or 2D CNN + temporal pooling) avoids Conv3d entirely.",
+    "evidence": "https://discuss.pytorch.org/t/will-the-conv3d-operation-be-supported-on-mps-through-pytorch/198233; https://huggingface.co/cerspense/zeroscope_v2_XL/discussions/7; https://github.com/pytorch/pytorch/issues/77764 (MPS op coverage tracker, referenced in forum post); https://github.com/pytorch/pytorch/issues/100674 (MaxPool3D on MPS); https://plato.cgl.ucsf.edu/trac/ChimeraX/ticket/17832 (fallback workaround report)",
+    "effort": "small"
+   },
+   {
+    "method": "Reproducibility caution when choosing among X3D, SlowFast, VideoMAE: compare only matched protocols",
+    "how_it_applies": "Published accuracy numbers differ across sources for the same model (e.g., X3D-L 77.4 in PyTorchVideo paper vs 76.9 in PySlowFast zoo with different GFLOPs). Robo Scout should choose by its own held-out per-launch evaluation, not by Kinetics leaderboard numbers. A reproducibility study attributes much of the apparent progress to unfair evaluation protocols.",
+    "evidence": "https://arxiv.org/pdf/2111.09887; https://github.com/facebookresearch/SlowFast/blob/master/MODEL_ZOO.md; https://arxiv.org/pdf/2010.11757 (A Comprehensive Study of Deep Video Action Recognition / reproducibility discussion referenced by search)",
+    "effort": "small"
+   }
+  ],
+  "recommendation": "Run a Conv3d/ConvTranspose3d smoke test on MPS first. If it passes, fine-tune X3D-S (Kinetics-400 weights, PyTorchVideo) as a binary made/miss classifier on short crops around each launch and Hive Cell region, using the ~20 labeled matches with leave-one-match-out validation; escalate to SlowFast only if X3D underfits trajectory cases, and consider VideoMAE only if fine-tuning a transformer is affordable on MPS. If Conv3d fails on MPS, use a 2D per-frame encoder with temporal pooling instead."
+ },
+ {
+  "topic": "Scoreboard/score-overlay OCR as weak supervision or consistency check for event counts in sports video (for Robo Scout Hive Cell / shot counting)",
+  "findings": [
+   {
+    "method": "Score-overlay change detection as a consistency oracle: locate the score box per frame, read it, and treat each monotonic increment of the score as a ground-truth event time. Bounds the count of scoring events per alliance and gives the event timestamps that the shot classifier must explain.",
+    "how_it_applies": "Robo Scout's Hive Cell tips (20 pts each) and per-ball points show up as score increments on the FTC broadcast overlay. Each increment is a constraint: the detector should produce at least one Hive-entry candidate near that timestamp. Per-robot attribution still needs the identity model, but the alliance-level count is a hard check on total entries found (currently 1 of many).",
+    "evidence": "Detection of score changes in sport videos using textual overlays (ResearchGate, https://www.researchgate.net/publication/252052751_Detection_of_score_changes_in_sport_videos_using_textual_overlays): reports score-change detection rate 1.00, clock detection rate 0.852, and 4 false score-change declarations on its test material. Abstract/snippet only; full text not opened.",
+    "effort": "medium"
+   },
+   {
+    "method": "Scoreboard localization before OCR (fixed ROI from first frames, or SIFT matching to a template, then OCR only the crop). Cropping is what makes OCR reliable on small overlay digits.",
+    "how_it_applies": "The FTC overlay is static, so a fixed ROI calibrated once per video is enough. Crop, upscale, and binarize before reading; discard frames where the overlay is absent (replays, transitions) rather than letting them break the score timeline.",
+    "evidence": "Localization and Recognition of the Scoreboard in Sports Video Based on SIFT Point Matching (Guo et al., ResearchGate https://www.researchgate.net/publication/220989039_Localization_and_Recognition_of_the_Scoreboard_in_Sports_Video_Based_on_SIFT_Point_Matching): SIFT locates the scoreboard, then a simple neural-net digit classifier reads digits, with a higher recognition rate than a general-purpose OCR engine. Also an Electronic Letters on Computer Vision and Image Analysis 20(1):99-116, 2021 paper (https://elcvia.cvc.uab.cat/article/download/v20-n1-guntuboina/589/4064): YOLO finds the scoreboard, crop then OCR, reported near 100% OCR accuracy after cropping.",
+    "effort": "small"
+   },
+   {
+    "method": "Template-free digit reading with coarse-to-fine layout and temporal rules: detect the score region, recognize digits without per-font training, and use score-change rules and temporal correlation across frames to reject OCR noise.",
+    "how_it_applies": "Robo Scout does not need a font-trained digit model. Temporal voting over a window of frames plus a rule that the score only increases (and only by plausible increments, e.g. 2 pts per ball, 20 per tip) filters single-frame misreads before they become false event labels.",
+    "evidence": "A Real-Time Score Detection and Recognition Approach for Broadcast Basketball Video (Miao, Zhu et al., ResearchGate https://www.researchgate.net/publication/221262832_A_Real-Time_Score_Detection_and_Recognition_Approach_for_Broadcast_Basketball_Video; Semantic Scholar https://www.semanticscholar.org/paper/A-Real-Time-Score-Detection-and-Recognition-for-Miao-Zhu/7715fa09907c9c3ccce266b30aceee36dc2510c3). Abstract-level only.",
+    "effort": "medium"
+   },
+   {
+    "method": "OCR-guided segment selection: OCR the scoreboard every N frames (paper samples at 0.1 s), validate read strings against regex formats, and when a counter increments, extract the corresponding segment for the detector. This turns OCR into a candidate generator and narrows the search window.",
+    "how_it_applies": "For Robo Scout, sample the overlay (e.g. every 0.1-0.5 s), and for each validated increment open a window around the timestamp to search for launches and Hive-entry frames, including the trajectory-reconstruction failure mid-air. Use the window to relabel/augment weak training data from the ~20 labeled videos.",
+    "evidence": "Automated Wicket-Taking Delivery Segmentation and Trajectory-Based Dismissal-Zone Analysis in Cricket Videos Using OCR-Guided YOLOv8 (arXiv 2510.18405, https://arxiv.org/html/2510.18405v2): samples frames at 0.1 s, ROI on scorecard, grayscale + power transform (gamma 7) + 15x15 dilation/erosion + median blur, regex validation, increment triggers segment extraction. Caveats from the paper: no OCR accuracy reported and no evaluation that the selected segments contain the events; the YOLO results do not feed back to validate OCR.",
+    "effort": "small"
+   },
+   {
+    "method": "Rule-based event decisions from overlay text changes (caption/score changes mapped to event rules), plus overlay absence (scoreboard shown only during live play) used to filter replays.",
+    "how_it_applies": "Use the overlay as a gate: count only during live-play frames where the overlay is visible, and treat score changes as the authoritative event count. Replays of a Hive tip should be deduplicated against the live event, not counted twice.",
+    "evidence": "A Survey on Content-Aware Video Analysis for Sports (arXiv 1703.01170, https://arxiv.org/pdf/1703.01170): describes rule-based event decisions from caption changes in baseball. Identification of replay segments patents (USPTO 7474698, https://image-ppubs.uspto.gov/dirsearch-public/print/downloadPdf/7474698): scoreboard usually appears only during live play, which can help detect replays.",
+    "effort": "small"
+   },
+   {
+    "method": "Open-source OCR building blocks for digit overlays: Tesseract (used in open scoreboard-ocr projects, e.g. https://github.com/Sunandagokhe/scoreboard-ocr and a basketball-highlights pipeline arXiv 1606.08955 that OCRs score, period and game clock to align play-by-play to video) and PaddleOCR PP-OCR (DB detection + CRNN recognition, current main README lists PP-OCRv6 with digital-display improvements, https://github.com/PaddlePaddle/PaddleOCR). Note: the search snippets for PaddleOCR versions were inconsistent; verify against the repo before depending on a version.",
+    "how_it_applies": "For a 7-segment-like or bitmap FTC scoreboard with few glyphs, a small CNN digit classifier trained on crops from the ~20 labeled videos (auto-labeled by the score-increment rule) is likely more reliable than general OCR. Tesseract or PaddleOCR are good baselines for the validation oracle, not the only option.",
+    "evidence": "https://github.com/Sunandagokhe/scoreboard-ocr ; https://arxiv.org/pdf/1606.08955 (Tesseract on score/clock overlay, abstract-level; full-text fetch returned unreadable PDF); https://github.com/PaddlePaddle/PaddleOCR",
+    "effort": "small"
+   }
+  ],
+  "recommendation": "Build a scoreboard oracle for Robo Scout: fixed-ROI crop of the FTC overlay, sampled every 0.1-0.5 s, read by a small digit CNN (bootstrapped from Tesseract/PaddleOCR on the ~20 labeled videos), validated with regex and monotonic-increment rules, and temporal voting across frames. Use each validated score increment as a hard constraint: the alliance's Hive-entry and shot candidates must explain every increment in a window around its timestamp, and missing candidates trigger a search of that window with relaxed trajectory filters. Per-robot attribution still comes from the identity model; the overlay constrains totals, not who scored. Caveat: none of the sources reports accuracy on FTC-style overlays; the cited accuracy figures come from other sports and from abstracts only, so the oracle's precision must be measured on the labeled videos before use."
+ },
+ {
+  "topic": "Semi-automatic video annotation for ball and robot tracks (CVAT, Label Studio video, SAM 2 propagation, interpolation) for labeling every shot and Hive Cell entry across 20 matches",
+  "findings": [
+   {
+    "method": "SAM 2 promptable video segmentation with memory-based propagation",
+    "how_it_applies": "Click a robot or ball once on a keyframe and propagate the mask/track through the clip, with corrections on any frame. Good for robot identity tracks (robots are large), so human labels only need to be placed where the tracker drifts or swaps identity. For a ~10 px ball it is weaker: mask propagation is overkill, and a point prompt plus a physics fit is likely more reliable.",
+    "evidence": "SAM 2: Segment Anything in Images and Videos, Ravi et al., arXiv:2408.00714 (ICLR 2025 oral), https://arxiv.org/abs/2408.00714 . Reports 3x fewer interactions for video segmentation and a model-in-the-loop data engine 8.4x faster at comparable quality, code at https://github.com/facebookresearch/segment-anything-2",
+    "effort": "medium"
+   },
+   {
+    "method": "CVAT SAM 2 tracker as an annotation action (keyframe then track forward)",
+    "how_it_applies": "Convert visible polygons on a frame into tracks and run tracking to a chosen frame. Supports polygons and masks but NOT rectangles, so it does not fit the current YOLO box pipeline directly. The on-prem path needs a Nuclio function plus Redis; the AI agent path requires CVAT 2.42.0 or later, and it loses active tracks on restart and allows one agent per tracking function. Budget for these operational limits before committing 20 matches to it.",
+    "evidence": "CVAT docs, Segment Anything 2 Tracker: https://docs.cvat.ai/docs/annotation/auto-annotation/segment-anything-2-tracker/ and https://docs.cvat.ai/docs/enterprise/segment-anything-2-tracker ; CVAT blog on SAM 2 video annotation: https://www.cvat.ai/blog/video-annotation-sam-2 . The blog and docs disagree on which plans get access, so verify the plan and version.",
+    "effort": "medium"
+   },
+   {
+    "method": "Keyframe interpolation (linear) with dense keyframes, Label Studio video object detector / VideoVector tag",
+    "how_it_applies": "Label Studio interpolates bounding box position and size linearly between keyframes, and VideoVector interpolates polygon vertices linearly. Linear interpolation is wrong for ballistic ball flight, so keyframes must be dense around each launch or fit a parabola per flight segment. Its export with --interpolate-key-frames and sequence JSON can feed the existing Python pipeline. Good for robot boxes between sparse keyframes, not for ball arcs.",
+    "evidence": "Label Studio video object detector template: https://labelstud.io/templates/video_object_detector ; VideoVector tag: https://docs.humansignal.com/tags/videovector ; Label Studio 1.6 blog: https://labelstud.io/blog/label-studio-1-6-video-object-tracking-and-new-annotation-ui ; Label Studio SAM 2 tracking blog: https://labelstud.io/blog/video-object-segmentation-and-tracking-with-videovector-tag-for-sam-2-in-label-studio",
+    "effort": "small"
+   },
+   {
+    "method": "Event-level labeling instead of per-frame labeling (launch frame, entry frame, robot id, outcome per shot)",
+    "how_it_applies": "The scoring targets are per-robot shots and Hive Cell entries, so the cheapest ground truth is one row per launch: launch timestamp, robot ID, entry timestamp or none, and the tipping event. Per-frame boxes are only needed for training the detector. Interpolation tools are for geometry, and the event list is what evaluation needs. This cuts 20-match labeling to a few minutes per match and avoids over-labeling.",
+    "evidence": "Inferred from the task requirements (per-robot shot and entry counts) and the interpolation semantics in the Label Studio and Encord docs above. Encord separates interpolation (between existing labels) from object tracking (SAM 2 on consecutive frames): https://docs.encord.com/docs/annotate-interpolation . Not a published benchmark; treat as a design recommendation.",
+    "effort": "small"
+   },
+   {
+    "method": "Tracker-in-the-loop pre-labeling with human correction only on disagreements",
+    "how_it_applies": "Run the current YOLO ball detector and robot tracker over each match to propose tracks, then have the reviewer fix only flagged frames (ID swaps, missed launches, missed entries). Published FMO work built ground truth this way: label the first frame, run a tracker, then correct. Reviewers judged that corrections were needed on long sequences because small errors accumulate.",
+    "evidence": "Benchmarking EfficientTAM on FMO datasets, arXiv:2509.06536, https://arxiv.org/html/2509.06536v1 (TbD ground truth made by labeling first frame, running tracker, correcting; EfficientTAM TIoU 0.7093 on Falling Object, 0.4546 on TbD). Labellerr SAM 2 docs also recommend human review for long sequences: https://docs.labellerr.com/features/sam-2-object-tracking (product guide, not an evaluation).",
+    "effort": "medium"
+   },
+   {
+    "method": "Stationary-camera semi-automatic annotation pipeline for small flying objects (shuttlecock)",
+    "how_it_applies": "A closely related setup: fixed camera, tiny fast object, semi-automatic labeling at scale (20,510 frames, 11 backgrounds, difficulty tiers). It reports a fine-tuned YOLOv8 at F1 0.86 in similar environments and 0.70 in unseen ones, which suggests holding out whole matches or venues when evaluating the Robo Scout detector. Note the title is 'One-Shot Badminton Shuttle Detection for Mobile Robots'. The fetched abstract did not say whether SAM 2 was used, so read the full text before copying its pipeline.",
+    "evidence": "arXiv:2603.06691, https://arxiv.org/abs/2603.06691 (v2 abstract, fetched)",
+    "effort": "small"
+   },
+   {
+    "method": "Benchmarks of SAM 2-family trackers on fast-moving and small objects",
+    "how_it_applies": "Before relying on SAM 2 propagation for balls, check how it performs on fast small objects. Reported results say DAM4SAM and SAMURAI perform well on harder fast-motion sequences, and the TSFMO benchmark covers 26 sports categories of small fast objects with 20 trackers. Use these to choose a tracker for ball and robot pre-labels rather than assume SAM 2 is best.",
+    "evidence": "arXiv:2512.09633, https://arxiv.org/pdf/2512.09633.pdf ; TSFMO benchmark, arXiv:2209.04284, https://arxiv.org/pdf/2209.04284",
+    "effort": "small"
+   }
+  ],
+  "recommendation": "Do not hand-label every frame of 20 matches. Build event-level ground truth (one row per launch with robot ID, launch time, entry time or none, and tip events), and pre-label it with the existing YOLO ball detector and robot tracker. Have a reviewer correct only the flagged frames: ID swaps, missed launches, and missed entries. Use SAM 2 (via CVAT's SAM 2 tracker or direct SAM 2 propagation) only for robot identity tracks, where objects are large. For the ~10 px balls, use point prompts with a parabolic fit between launch and apex, not linear keyframe interpolation. Verify the SAM 2 tracker benchmarks on small fast balls (arXiv:2512.09633) before adopting it for balls. Source gap: I found no published study that applies SAM 2 keyframe propagation to tiny, fast robotics balls, so the ball pipeline needs a pilot on 2 or 3 matches to measure it."
+ },
+ {
+  "topic": "SAM 2 / SAM 2.1 video tracking for following specific robots through occlusion and distractors; Apple Silicon speed; box prompts plus re-prompting",
+  "findings": [
+   {
+    "method": "SAM 2.1 promptable video segmentation with streaming memory (memory attention conditions each frame on past frames, predictions and prompts)",
+    "how_it_applies": "Robo Scout's SAM 2.1 seed-mask step can be extended from a single seed into a per-robot track: seed each selected robot from its identity-confirmed box, propagate the mask through the clip, and use the mask (not only the box) to keep per-robot ownership of nearby launches. The paper reports video accuracy gains with 3x fewer interactions than prior approaches, so re-prompting should be rare.",
+    "evidence": "SAM 2 paper, arXiv 2408.00714 (ICLR 2025 oral), https://arxiv.org/abs/2408.00714 ; search-snippet summaries only, full PDF not opened",
+    "effort": "small"
+   },
+   {
+    "method": "SAM 2.1 official checkpoint speed table (tiny 91.2 FPS, small 84.8, base+ 64.1, large 39.5)",
+    "how_it_applies": "These FPS numbers were measured on an NVIDIA A100 (torch 2.5.1, CUDA 12.4), not on Apple Silicon, so they do not predict Mac speed. Plan on the tiny or small checkpoint for per-frame propagation on MPS and budget with a local benchmark on the 1280x720 clip before committing to every-frame tracking.",
+    "evidence": "https://github.com/facebookresearch/sam2 (fetched; table and 'Speed measured on an A100' note). Apple Silicon/MPS is not mentioned in that repo page.",
+    "effort": "small"
+   },
+   {
+    "method": "Anecdotal MPS timing and MLX port",
+    "how_it_applies": "Unverified third-party numbers: a blog reports SAM 2.1 Tiny via Ultralytics on PyTorch MPS at about 1.6 s for one point segmentation and about 1.5 s per multi-point update. A community MLX port (mlx-sam) reports a self-reported 1.27x speedup for the large model on one prompted 1024x1024 frame on an M2 Max; its quantized checkpoints mainly save memory, not latency. Together these suggest MPS per-frame SAM 2 may be too slow for every frame of a full match, so run it on keyframes or crops around the robot only. I found no independent MPS video-tracking benchmark.",
+    "evidence": "https://ice-ice-bear.github.io/posts/2026-04-08-sam2-mac (blog, not verified); https://pypi.org/project/mlx-sam/0.2.0/ (self-reported); https://docs.ultralytics.com/models/sam2 (surfaced in search, not fetched)",
+    "effort": "medium"
+   },
+   {
+    "method": "DAM4SAM / SAM2.1++: distractor-aware memory plus introspection-based memory update, added to SAM2.1 without retraining",
+    "how_it_applies": "Directly targets the failure mode of robots being swapped with similar-looking distractors. Memory-based trackers, including SAM 2, struggle with distractors; DAM4SAM adds a distractor-aware memory and a DiDi distractor-distilled dataset. It is a candidate drop-in replacement for the plain SAM 2.1 tracker used for robot identity. Its abstract claims SOTA on six of seven benchmarks, but the page gives no numeric gains, so benchmark it on the labeled matches.",
+    "evidence": "Videnovic, Lukezic, Kristan, arXiv 2411.17576, https://arxiv.org/abs/2411.17576 ; code https://github.com/jovanavidenovic/DAM4SAM",
+    "effort": "medium"
+   },
+   {
+    "method": "SAMURAI: motion-aware memory selection on SAM 2 with no retraining, real-time claim",
+    "how_it_applies": "Addresses SAM 2's fixed-window memory, which can propagate errors across frames during crowding and self-occlusion, which is exactly the robot-swap case in a crowded arena. Motion cues can also help predict where a robot is when a ball or another robot occludes it. Reported gains: +7.1% AUC on LaSOT_ext and +3.5% AO on GOT-10k. These are generic single-object benchmarks, not robot-specific; the paper page does not list a code repo, only the project page.",
+    "evidence": "Yang et al., arXiv 2411.11922, https://arxiv.org/abs/2411.11922 ; project page https://yangchris11.github.io/samurai/",
+    "effort": "medium"
+   },
+   {
+    "method": "SAM2MOT / SAM2-Animal-Tracking: detector boxes as SAM 2 prompts, with re-prompting of existing tracks only on spatially unambiguous detections",
+    "how_it_applies": "This is the box-prompt-plus-re-prompt pattern Robo Scout needs. The robot YOLO detector supplies boxes; a track is re-prompted only when its detection is unambiguous (a key rule for not handing identity to the wrong robot when two similar robots overlap). Cross-object interaction is used to handle occlusion. Robo Scout's per-team identity classifier can serve as the gate that decides whether a re-prompt is allowed.",
+    "evidence": "SAM2MOT, arXiv 2504.04519, https://arxiv.org/pdf/2504.04519 , code https://github.com/TripleJoy/SAM2MOT ; SAM2-Animal-Tracking code https://github.com/ecker-lab/SAM2-Animal-Tracking (search snippets, not fetched)",
+    "effort": "medium"
+   },
+   {
+    "method": "SAM-PD: iterative box propagation (previous-frame mask box becomes next-frame prompt) with jittered and scaled box prompts, keeping the candidate with the highest semantic similarity",
+    "how_it_applies": "Gives a concrete recipe for re-prompting without a detector on every frame: propagate the robot box from the last mask, jitter it to recover from drift, and select the candidate by appearance similarity to the identity reference. Useful as a fallback when the robot detector misses frames.",
+    "evidence": "https://github.com/infZhou/SAM-PD (search snippet only, not fetched)",
+    "effort": "medium"
+   },
+   {
+    "method": "Limitation for balls (inference, not sourced)",
+    "how_it_applies": "SAM 2 is built for object masks in video, and Pollen balls are about 10 px. I found no source that tests SAM 2 on objects this small or this fast. Keep SAM 2 on the robots and use it for balls only if a local test shows it works; the ball-trajectory gap likely needs a different fix, such as the detector at 960 px with Kalman or motion-aware association.",
+    "evidence": "Inference from the SAM 2 paper scope and the task's ball size; no direct source",
+    "effort": "small"
+   }
+  ],
+  "recommendation": "Replace the single-seed SAM 2.1 use with a per-robot tracker: seed each robot from its identity-confirmed YOLO box, then propagate with SAM 2.1 tiny or small on MPS, and re-prompt a track only when the box is unambiguous and the team-identity classifier agrees (SAM2MOT / SAM2-Animal-Tracking rule). Benchmark DAM4SAM and SAMURAI as drop-in trackers against plain SAM 2.1 on the ~20 labeled matches, using robot-swap rate and per-robot shot attribution as the metrics. Measure MPS FPS locally on the 1280x720 clip first, since no source gives an Apple Silicon video-tracking number. Do not expect SAM 2 to fix ball loss, because the sources cover object masks, not 10 px balls."
+ },
+ {
+  "topic": "Field homography and camera calibration for a fixed side-view sports camera (image to field coordinates, robot position and ball flight constraints, known field markers)",
+  "findings": [
+   {
+    "method": "Planar homography from known pitch model with line-extremity correspondences and RANSAC, then decomposition into camera intrinsics and extrinsics (SoccerNet calibration baseline)",
+    "how_it_applies": "Robo Scout's camera is fixed, so one calibration per video (or per venue setup) is enough. Mark field-model points (mat edges, tape line intersections, goal/Cell footprints) in a few frames, fit H with RANSAC, decompose to camera parameters, and reuse for every frame. This maps each robot's floor contact point to field coordinates so identity can be gated by position continuity and zone rules. Caveat: a plain homography only holds for points on the floor plane. Hive Cell rim points sit above the floor, so use the decomposed camera (PnP) for them, not H alone.",
+    "evidence": "https://github.com/SoccerNet/sn-calibration (official SoccerNet calibration repo: RANSAC homography, ellipse/line refinement, decomposition into camera parameters). Baseline description also in https://arxiv.org/pdf/2309.06006 (SoccerNet 2023 challenge results).",
+    "effort": "small"
+   },
+   {
+    "method": "Keypoint detector plus homography (YOLO-style pose/keypoint model on pitch landmarks, cv2.findHomography on whatever subset is visible)",
+    "how_it_applies": "Robo Scout already runs YOLO. A YOLO keypoint model trained on FTC field landmarks (mat corners, Cell corners, goal corners, tape intersections) can replace hand calibration. Because the number of visible landmarks varies, use findHomography with RANSAC and reject frames with too few inliers. This pattern is directly reproducible in Ultralytics plus OpenCV.",
+    "evidence": "https://blog.roboflow.com/camera-calibration-sports-computer-vision/ (Roboflow tutorial: trains YOLOv8 keypoints on pitch landmarks, computes homography with OpenCV findHomography because visible keypoint count changes with camera motion).",
+    "effort": "small"
+   },
+   {
+    "method": "Keypoint-and-line joint optimization with one generalizing model (PnLCalib)",
+    "how_it_applies": "Most relevant if the broadcast view or camera setup varies across held-out matches. PnLCalib refines the camera using both detected keypoints and line extremities in a non-linear optimization, and the authors report one model covering the SoccerNet distribution rather than one per camera location. For Robo Scout the field geometry is fixed, so the benefit is robustness to partial occlusion by robots and the Cell rather than generalization.",
+    "evidence": "https://arxiv.org/abs/2404.08401 (PnLCalib: Sports Field Registration via Points and Lines Optimization); https://arxiv.org/html/2404.08401 ; open implementation lineage in the SoccerNet challenge page https://nikolasent.github.io/deeplearning/computervision/calibration/competitions/2023/06/20/SoccerNet-Camera-Calibration-2023.html",
+    "effort": "medium"
+   },
+   {
+    "method": "Dense keypoint set (line-line intersections, line-conic intersections, conic tangent points) with HRNet heatmaps and PnP refinement (2023 SoccerNet top solution)",
+    "how_it_applies": "Shows that adding many derived keypoints from intersections and tangent points, then refining with PnP, gives stable calibration with fewer manual labels. Analogue for FTC: derive extra keypoints from mat-edge intersections and the Cell's rectangular rim so calibration survives when the Cell is partly occluded.",
+    "evidence": "https://nikolasent.github.io/deeplearning/computervision/calibration/competitions/2023/06/20/SoccerNet-Camera-Calibration-2023.html (top-1 write-up: 57 keypoints, HRNetV2-w48 heatmaps, PnP solver).",
+    "effort": "medium"
+   },
+   {
+    "method": "Single-model keypoint and line calibration with a shared solver and reported accuracy (sportcal)",
+    "how_it_applies": "Open-source reference for a calibration pipeline with a web app for checking projections. The repo's model is for hockey, soccer, tennis and basketball, so it is not directly usable for FTC, but its label format and reprojection-error check (reported 7.7 px on hand labels) are a template for validating Robo Scout calibration against hand-labeled frames.",
+    "evidence": "https://github.com/oscardiaz1331/sportcal",
+    "effort": "small"
+   },
+   {
+    "method": "Single-camera 3D ball lift using gravity dynamics and court geometry, with a cost function that avoids model drift",
+    "how_it_applies": "Addresses the lost-mid-air problem. Once the camera is calibrated, each 2D ball track can be lifted to 3D by fitting a gravity model with drag-free ballistic dynamics, constrained by known launch zones. Robo Scout can then test whether the 3D trajectory crosses the Cell rim plane inside the Cell footprint, which is more reliable than 2D overlap. The 2015 ISCSS paper reports that earlier monocular reconstruction suffers from model drift and proposes a new cost function to fix it. The 2012 IEEE paper integrates court specifications and ball physics for the 2D-to-3D inference.",
+    "evidence": "https://ieeexplore.ieee.org/document/6115930/ (3D ball trajectory reconstruction from single-camera sports video, volleyball/court geometry); http://www.shenlj.cn/en/Shen_CP2M_iscss2015.pdf (gravity-model fitting with new cost function); https://arxiv.org/html/2506.07981 (real-time soccer ball localization from a single camera).",
+    "effort": "medium"
+   },
+   {
+    "method": "Parabola-only fitting is fragile; use physics priors with tolerance for deflection",
+    "how_it_applies": "Per the 2025 soccer ball paper summary found in search (not verified against the full text), real paths rarely follow a simple parabola because of deflections and mis-hits, so a pure parabola fit will reject real Hive entries. Robo Scout should fit a ballistic model with a robust loss (e.g., RANSAC over segments) and allow a contact or deflection breakpoint, rather than requiring one clean parabola per flight.",
+    "evidence": "https://arxiv.org/html/2506.07981 (the search summary attributes this parabola critique to the 2025 soccer paper; confirm by reading the paper before relying on it).",
+    "effort": "small"
+   }
+  ],
+  "recommendation": "Calibrate the fixed camera once per setup: label FTC field landmarks (mat corners, tape intersections, Cell rim corners) on a few frames, fit the camera with RANSAC PnP (not a plain floor homography, because the Cell rim is elevated), and validate by reprojection error on held-out frames. Use the calibrated camera to (1) map each robot's floor contact point to field coordinates for identity gating by position continuity and zone rules, and (2) lift each ball track to 3D with a robust ballistic fit, then count a Hive entry only if the 3D path crosses the Cell rim plane inside the Cell footprint. No FTC-specific calibration source was found; the SoccerNet, PnLCalib, Roboflow and sportcal sources are the closest references and must be adapted to the FTC field model."
+ },
+ {
+  "topic": "Event-level evaluation methodology: time-tolerance matching, per-entity precision/recall, held-out benchmarks across matches",
+  "findings": [
+   {
+    "method": "Time-tolerance event matching with one-to-one assignment (SoccerNet action spotting protocol)",
+    "how_it_applies": "Robo Scout should score each predicted launch or Hive-entry as a true positive only if it falls within a tolerance delta of a ground-truth event of the same type, with each prediction and each ground-truth event used at most once. Unmatched predictions are FP and unmatched ground truth is FN. Report results at several deltas (e.g., 0.5s, 1s, 2s) rather than one, because the Hive-entry timing is fuzzy when balls rise into the cell from below. Robo Scout's ball paths are lost mid-air, so tolerance sweeps show whether misses are timing errors or true misses.",
+    "evidence": "SoccerNet original paper, https://arxiv.org/abs/1804.04527 (abstract: spotting = finding event anchors; tolerance delta from 5 to 60 s; Average-mAP baseline 49.7%). Full-text read via ar5iv https://ar5iv.labs.arxiv.org/html/1804.04527: a prediction is a TP if within delta of a ground-truth anchor; per-class AP per delta; mAP averaged over classes; Average-mAP is the area under the mAP-vs-delta curve. The paper does not explicitly state one-to-one matching or the same-class rule; these are implied by the per-class evaluation. SoccerNet 2023 results describe Average-mAP as area under the mAP curve over tolerances (https://arxiv.org/pdf/2309.06006). The tight version uses 1-5 s tolerances (https://arxiv.org/pdf/2404.09951).",
+    "effort": "small"
+   },
+   {
+    "method": "Per-entity identity-level precision/recall (IDF1 / IDP / IDR)",
+    "how_it_applies": "To attribute shots to the correct robot, compute identity-level TP/FP/FN by a global one-to-one matching between predicted robot tracks and ground-truth robot tracks, then report IDP, IDR and IDF1. This directly measures the identity-swap problem: a shot credited to the wrong robot counts as an IDFP plus an IDFN, not a free pass. Use the same matching to produce per-robot shot precision and recall.",
+    "evidence": "Ristani et al., Performance Measures and a Data Set for Multi-Target, Multi-Camera Tracking, ECCV 2016, https://arxiv.org/abs/1609.01775 (abstract confirms a pair of precision-recall measures that treat all error types uniformly and emphasize correct identification). IDF1 = 2*IDTP/(2*IDTP+IDFP+IDFN) as summarized in secondary sources: https://arxiv.org/pdf/2506.13457. The IDF1 formula details could not be read from the PDF in this session; verify exact definitions in the original paper.",
+    "effort": "medium"
+   },
+   {
+    "method": "Report HOTA with DetA/AssA decomposition alongside IDF1 and ID switches",
+    "how_it_applies": "Separate detection quality (DetA: TP/(TP+FN+FP)) from association quality (AssA: Jaccard over trajectory-level TPA/FNA/FPA). This tells Robo Scout whether shot misses come from the ball detector (low DetA) or from robot identity tracking (low AssA). Also count identity switches per robot, since the current failures are swaps. Use the TrackEval/HOTA reference implementation for computation.",
+    "evidence": "Luiten et al., HOTA: A Higher Order Metric for Evaluating Multi-object Tracking, IJCV 2021, arXiv:2009.07736. Full-text read via ar5iv https://ar5iv.labs.arxiv.org/html/2009.07736: DetA = TP/(TP+FN+FP); AssA = mean over TPs of TPA/(TPA+FNA+FPA); HOTA_alpha = sqrt(DetA*AssA); final HOTA averages alpha over 0.05 to 0.95 in 0.05 steps. The paper states MOTA overweights detection and IDF1 overweights association. Reference code: https://github.com/JonathonLuiten/HOTA-metrics (named in search results, not fetched).",
+    "effort": "medium"
+   },
+   {
+    "method": "Event-level matching for sparse rare events: avoid metrics dominated by single events",
+    "how_it_applies": "Robo Scout has few Hive entries per match, so a single missed entry can swing AP. Report raw TP/FP/FN counts and per-match counts alongside any AP-style score, and include bootstrap confidence intervals over matches rather than over events.",
+    "evidence": "Deep Learning for Sports Video Event Detection survey, https://arxiv.org/pdf/2505.03991 (notes strict tolerance windows make the task much harder and that rare classes can be dropped because the metric is highly sensitive to single predictions). Secondary; verify against the survey text.",
+    "effort": "small"
+   },
+   {
+    "method": "Held-out benchmark split at the match level (no leakage across matches or halves)",
+    "how_it_applies": "Split Robo Scout's ~20 labeled videos by whole match, never by frame or launch window, so windows from the same match never appear in both train and test. Keep a sealed test set of matches not used for threshold or classifier tuning, mirroring the SoccerNet challenge set whose labels are withheld and scored only through a server. With 20 videos, use leave-matches-out cross-validation and report variance across folds.",
+    "evidence": "SoccerNet-v2 splits are made per match with two halves per match; the challenge split labels are withheld and scored via an evaluation server (https://arxiv.org/pdf/2011.13367v1.pdf, https://arxiv.org/pdf/2206.07846). A ball-header paper explicitly splits at game level to avoid train/test window overlap (https://arxiv.org/pdf/2609.39300). The SoccerNet leakage rationale was not explicitly confirmed in the sources read.",
+    "effort": "small"
+   }
+  ],
+  "recommendation": "Adopt a two-level evaluation for Robo Scout: (1) event-level matching of predicted launches and Hive entries to ground truth using a same-type time tolerance with one-to-one assignment, reported across a sweep of tolerances (e.g., 0.5 to 2 s) so timing error is separated from true misses; (2) entity-level scoring of per-robot shots using a global one-to-one identity matching that yields IDP/IDR/IDF1 and identity switch counts, with HOTA's DetA/AssA as a diagnostic split. Build the held-out benchmark by splitting the ~20 labeled matches at the match level, with a sealed test set and leave-matches-out cross-validation, reporting per-match counts and confidence intervals. Verify the exact IDF1 and HOTA formulas in the original papers and TrackEval before implementing, since the PDF text could not be extracted in this session."
+ },
+ {
+  "topic": "Active learning and human-in-the-loop correction loops for video event detectors (prioritizing uncertain clips, model-assisted labeling, retraining cadence), applied to Robo Scout",
+  "findings": [
+   {
+    "method": "Entropy-based clip selection for review with max-pooled frame scores (uncertainty sampling beats random at low budgets)",
+    "how_it_applies": "Score each candidate launch/shot window by entropy of the current shot classifier (or detector class confidences), pool per-frame scores to clip level with max pooling, and send the top-scoring clips to human review instead of random clips. Robo Scout's per-launch reviews on ~20 videos can be used to measure whether entropy ranking finds more mislabeled shots than random sampling.",
+    "evidence": "Giancola et al., 'Towards Active Learning for Action Spotting in Association Football Videos', CVPRW 2023, https://ar5iv.labs.arxiv.org/html/2304.04220 (fetched). Reported: Entropy Measure reached 90% of final performance with ~16% of data vs ~45% for random sampling on SoccerNet-v2 with NetVLAD++; max pooling beat mean pooling for clip scores. Note: the Uncertainty Measure gave only limited gains on the denser dataset.",
+    "effort": "small"
+   },
+   {
+    "method": "Adaptive review batch sizes with continual fine-tuning instead of retraining from scratch each round",
+    "how_it_applies": "Start with small review batches and grow them as labeled data accumulates (e.g. 2%, then 5%, then 10% of the pool), and fine-tune the existing model for a few epochs per round at a fixed learning rate rather than training from scratch. This cuts the number of retrain cycles and wall-clock time on the MPS machine, which matters for YOLO retraining on Apple Silicon.",
+    "evidence": "Giancola et al. CVPRW 2023, https://ar5iv.labs.arxiv.org/html/2304.04220 (fetched). Adaptive schedule reduced rounds from ~100 to ~30 and saved ~70% of time; continual fine-tuning (20-epoch bootstrap, then 5 epochs per round) kept the uncertainty advantage over random sampling.",
+    "effort": "small"
+   },
+   {
+    "method": "Margin-based uncertainty for detectors with per-image aggregation and class-balancing weight for rare classes",
+    "how_it_applies": "For each detection compute the top-1 vs top-2 class score margin, convert to an uncertainty (1-gap)^2, aggregate per image by sum, and add a weight to boost underrepresented predicted classes. Applicable to YOLO detections of balls (Pollen vs Nectar confusion) and robot-identity classifier outputs. Batches are formed by splitting the unlabeled pool into fixed groups and annotating the highest-scoring group.",
+    "evidence": "Brust et al., 'Active Learning for Deep Object Detection', https://ar5iv.labs.arxiv.org/html/1809.09875 (fetched; the PDF link was not readable). Reported on new VOC classes with class weighting: ~24.3 mAP after 250 samples vs 21.9 for random; gap narrows at full data (32.7 vs 32.4).",
+    "effort": "medium"
+   },
+   {
+    "method": "Localization-aware and hybrid uncertainty/diversity selection for detectors",
+    "how_it_applies": "Robo Scout's ball detector misses small Pollen balls mid-air; selecting frames where box localization is unstable (IoU between intermediate and final box) or where detections disagree across frames targets exactly those hard cases, rather than only confident-classification errors.",
+    "evidence": "Search-snippet only, not fetched: Kao et al. 'Localization-Aware Active Learning for Object Detection' (arXiv 2018), cited in https://image-ppubs.uspto.gov/dirsearch-public/print/downloadPdf/11960984; Wu et al. arXiv 2204.07965 (instance-level uncertainty + diversity), https://arxiv.org/pdf/2204.07965. Treat as unverified details.",
+    "effort": "medium"
+   },
+   {
+    "method": "Binary or frame-level human queries on the model's least-certain moment, then retrain per round",
+    "how_it_applies": "Instead of asking annotators to label whole clips, ask a narrow question (e.g. did this ball enter the Cell? which robot launched it?) at the single frame where the model is least certain. This makes review faster for the shot-entry decisions that the current pipeline gets wrong.",
+    "evidence": "Ji et al., 'Are Binary Annotations Sufficient? Video Moment Retrieval via Hierarchical Uncertainty-Based Active Learning', CVPR 2023, https://openaccess.thecvf.com/content/CVPR2023/papers/Ji_Are_Binary_Annotations_Sufficient_Video_Moment_Retrieval_via_Hierarchical_Uncertainty-Based_CVPR_2023_paper.pdf (search snippet only, not fetched).",
+    "effort": "medium"
+   },
+   {
+    "method": "Pre-label, correct, review-sample, retrain loop with edit-rate monitoring and cold-start bootstrap",
+    "how_it_applies": "Hand-label a small seed set (guidance in the Ultralytics material suggests 100-200 examples per new class), train a rough v0 model, have it pre-label new frames, let annotators correct only the wrong boxes, and track the per-batch edit rate. A rising edit rate signals drift from the labeled distribution and triggers retraining. Reviewing every pre-label before it enters a training version guards against baking systematic model errors into ground truth.",
+    "evidence": "Ultralytics glossary and academy material, https://www.ultralytics.com/glossary/data-labeling and https://academy.ultralytics.com/courses/build-with-ultralytics-platform/auto-annotation (search snippets only, not fetched). Academic analogue: arXiv 2504.01010 (iterative YOLO loop from a small manual seed set), https://pdf.arxiv.org/pdf/2504.01010 (snippet only). Blog note that proposals are worst on occluded/rare cases is from https://www.ultralytics.com/blog/auto-labeling-active-learning-tools (snippet only).",
+    "effort": "small"
+   },
+   {
+    "method": "Temporal boundary-focused clip-budgeted labeling",
+    "how_it_applies": "For event timing (launch and Cell-entry instants), rank clips by MC-dropout uncertainty and request labels only at predicted event boundaries. Relevant to the problem that ball paths are lost mid-air, since boundary frames are where tracker handoffs fail.",
+    "evidence": "arXiv 2604.15173, 'Boundary-Centric Clip-Budgeted Active Learning for Temporal Action Segmentation', https://arxiv.org/pdf/2604.15173 (search snippet only, not fetched).",
+    "effort": "large"
+   }
+  ],
+  "recommendation": "Build a review queue that ranks candidate launch and Cell-entry windows by the shot classifier's entropy (max-pooled over frames), start with small review batches of about 2% of the pool, and grow them to 5% then 10% as labels accumulate. Fine-tune the existing YOLO and classifier weights for a few epochs per round rather than retraining from scratch, and check the ranking against random sampling on the ~20 labeled matches. Ask narrow binary questions (ball entered Cell? which robot launched?) at the least-certain frame. Pre-label with the current detector and track the per-batch correction rate as a drift signal. Note that the Brust and Giancola numbers come from other domains (VOC, SoccerNet), and the Ji, Kao, and Ultralytics details were taken from search snippets and not read in full."
+ },
+ {
+  "topic": "Occlusion by a container frame/net and confirming a ball settled inside a basket from a side view (settle, stop, persist; persistence and color-count methods)",
+  "findings": [
+   {
+    "method": "Occlusion-aware temporal ball detection (TOTNet): use a short clip (3D conv over several frames) so the detector infers a ball's position when it is hidden, trained with occlusion augmentation and a visibility-weighted loss.",
+    "how_it_applies": "Robo Scout loses balls mid-air and when they pass behind the Cell frame. A temporal model over a window of frames, or per-frame detections fused with a motion model, can carry a ball through partial and full occlusion instead of dropping the track. Reported gains on occluded frames: accuracy 0.63 to 0.80, RMSE 37.30 to 7.19 (table tennis, tennis, badminton; the paper's own TTA dataset). Transfer to a 10 px ball is unverified.",
+    "evidence": "TOTNet: Occlusion-Aware Temporal Tracking for Robust Ball Detection in Sports Videos, https://arxiv.org/abs/2508.09650 (abstract/HTML at https://arxiv.org/html/2508.09650v1)",
+    "effort": "medium"
+   },
+   {
+    "method": "Low-confidence detections kept for association (ByteTrack): match low-score boxes to existing tracklets by overlap/motion instead of discarding them, which recovers objects that are partly occluded.",
+    "how_it_applies": "Balls behind the net or frame often produce low-confidence or no YOLO detections. Keeping low-score ball boxes and associating them to a predicted ball track (rather than starting new tracks) addresses the 'ball path lost mid-air' failure. Use the same mechanism to keep per-robot tracks alive through brief occlusion, which may also reduce identity swaps.",
+    "evidence": "ByteTrack: Multi-Object Tracking by Associating Every Detection Box, Zhang et al., https://arxiv.org/abs/2110.06864 (reports IDF1 gains of 1 to 10 points across nine trackers)",
+    "effort": "small"
+   },
+   {
+    "method": "Stopped-object detection via dual or multi-rate background models (dual-background subtraction with different learning rates; multi-detector with absorption rates per motion class and a finite state machine that labels moving / short-term stationary / long-term stationary).",
+    "how_it_applies": "A ball that settles inside the Cell stops moving and would be absorbed into a background model, so pure frame-difference would lose it. Keeping a slow-adapting background model alongside a fast one lets a settled ball stay flagged as a stationary foreground blob for longer. The state machine maps directly to ball states: in-flight, settled, persisting. Caveat: the PubMed record (PMID 28026761) could not be fetched; its title and details are from search snippets only and should be checked before citing.",
+    "evidence": "Search summaries pointing to a dual-background stationary-object paper (Springer, https://link.springer.com/article/10.1155/2011/858502) and a three-detector state-machine paper (PMID 28026761, https://pubmed.ncbi.nlm.nih.gov/28026761/, not verified in full). Survey of comparative methods: Bayona et al., AVSS 2009, https://repositorio.uam.es/bitstream/handle/10486/667138/comparative_bayona_AVSS_2009_ps2.pdf",
+    "effort": "medium"
+   },
+   {
+    "method": "Offline gap filling after tracking: Gaussian-smoothed interpolation (GSI) or linear interpolation between track endpoints, applied after the forward pass, with an explicit note that GSI did not beat linear interpolation on MOT17-val (OC-SORT).",
+    "how_it_applies": "Robo Scout's ball paths break mid-air. Running a post-hoc pass that fills gaps between the last and next confident ball detections (linear for short gaps, smoothed for longer) restores full trajectories for the shot classifier. Test linear vs GSI on the 20 labeled videos, since the sources disagree on which is better.",
+    "evidence": "StrongSORT: Make DeepSORT Great Again, https://arxiv.org/abs/2202.13514 (introduces GSI); Observation-Centric SORT, https://arxiv.org/abs/2203.14360 (finds GSI worse than linear on MOT17-val)",
+    "effort": "small"
+   },
+   {
+    "method": "Lost-track association via motion over appearance: a Kalman-style motion model alone can associate across long occlusions, while appearance re-ID features are unreliable under severe occlusion and cause identity switches.",
+    "how_it_applies": "Supports the decision to use motion-based association for balls and for robot tracks through occlusion, and warns against leaning on the per-team identity classifier when robots overlap or occlude. Identity recovery should prefer motion and position continuity over appearance.",
+    "evidence": "ByteTrack, https://arxiv.org/abs/2110.06864; DeepSORT/SORT comparison summarized in Deep Learning-Based Multi-Object Tracking survey, https://arxiv.org/pdf/2506.13457",
+    "effort": "small"
+   }
+  ],
+  "recommendation": "Replace the single-frame ball detection with a ByteTrack-style tracker that keeps low-confidence ball boxes and carries tracks through occlusion on a motion model, then add an offline gap-fill pass (linear first, GSI as a comparison) so each shot yields a complete trajectory. Detect settling with a slow-adapting background model or a per-blob stationarity state (moving / settled / persisting) inside the Cell region, and count only balls that persist there for N frames. No source found covered a ball settling in a net or a color-count method, so those parts still need the team's own labeled-video validation."
+ },
+ {
+  "topic": "Lightweight end-to-end architectures for per-player stat extraction from sports video (detection -> tracking -> event -> attribution)",
+  "findings": [
+   {
+    "method": "Decouple per-player identity from detection: run a person detector plus a tracker (StrongSORT in the SoccerNet-GSR baseline, DeepSORT in the 2024 winner), with appearance re-ID embeddings used to keep tracklets consistent. Identity is a tracklet-level property, not a per-frame one.",
+    "how_it_applies": "Robo Scout's robot identity swaps between similar robots are a re-ID/tracklet-consistency problem. Add an appearance embedding per robot box (team color, number plate, or a re-ID model trained on robot crops) and associate with appearance plus motion, instead of relying on the frame-level classifier alone.",
+    "evidence": "SoccerNet GSR baseline, Somers et al., arXiv 2404.11335 (https://arxiv.org/html/2404.11335v1): YOLOv8 person detection, StrongSORT with PRTreID embeddings. Winner, Golovkin et al., arXiv 2504.06357 (https://arxiv.org/abs/2504.06357): YOLOv5m detector, DeepSORT with re-ID.",
+    "effort": "medium"
+   },
+   {
+    "method": "Tracklet-level majority voting for identity attributes: predict role/team/jersey per detection, then take the most common label within each tracklet, and cluster tracklet-averaged embeddings (K-means into 2 teams) for team assignment.",
+    "how_it_applies": "Instead of classifying each frame's robot identity, aggregate the per-team/per-robot classifier outputs over each track and assign identity by vote (and by averaged embedding clustering for alliance). This directly reduces the 87% per-frame roster error and stops a single wrong frame from flipping attribution. Note the paper does not specify tie or null handling, so define it yourself.",
+    "evidence": "Golovkin et al. arXiv 2504.06357 (abstract: majority voting within tracklets is mentioned in the SoccerNet 2025 results report arXiv 2508.19182); SoccerNet-GSR baseline arXiv 2404.11335 section on aggregation over time (role and jersey by majority vote, team by K-means over averaged PRTreID embeddings of player tracklets).",
+    "effort": "small"
+   },
+   {
+    "method": "Evaluate with an attribute-aware HOTA-style metric: similarity = localization similarity x identity similarity, where identity similarity requires all attributes (role, team, jersey) to match. This separates detection/localization errors from attribution errors.",
+    "how_it_applies": "Robo Scout needs per-robot shot attribution scored separately from shot detection. Adopt a GS-HOTA-like score for the robot-identity track and a per-robot counting error for shots and Hive entries, so you can see which stage is the bottleneck on the held-out match.",
+    "evidence": "SoccerNet-GSR paper arXiv 2404.11335: GS-HOTA = HOTA with Sim = LocSim x IdSim, tau = 5 m, matches over alpha in [0.05, 0.95]; baseline 22.26% test GS-HOTA. Module oracle ablation: bounding-box detection is the weakest stage (35.28) and jersey number is 56.75, suggesting the identity stage is where a pipeline most often fails.",
+    "effort": "small"
+   },
+   {
+    "method": "Stage-wise oracle ablation to find the bottleneck: replace one module with ground truth and measure the metric change.",
+    "how_it_applies": "Use the same approach on Robo Scout: swap in ground-truth robot IDs, then ground-truth ball tracks, then ground-truth Cell entries, and see which swap recovers the most stat accuracy. This is a cheap way to prioritize work among the detector, tracker, launch scanner and classifier.",
+    "evidence": "SoccerNet-GSR arXiv 2404.11335 module ablation (team side 92.00, ReID 87.42, calibration 51.39, pitch 49.99, jersey number 56.75, bbox detection 35.28).",
+    "effort": "small"
+   },
+   {
+    "method": "Dedicated lightweight tracker for tiny, fast objects: TrackNetV2 uses a multi-frame heatmap CNN for shuttlecock/ball tracking, reported as 2.6 FPS to 31.8 FPS speedup, with 85.2% accuracy and 97.2% precision on a new match.",
+    "how_it_applies": "Robo Scout's yellow Pollen balls are about 10 px and get lost mid-air. A TrackNet-style model that takes stacked consecutive frames (and outputs a ball heatmap) is designed for exactly this small-fast-ball regime, and can be used for trajectory continuity rather than per-frame YOLO detection. Caveat: the citation attribution is inconsistent (Sun et al. 2020 vs. Huang et al. 2019 in RacketVision), so check the paper front matter; TrackNetV4 reports different numbers for TrackNetV2, and one table-tennis comparison found YOLOv4 beat TrackNetv2 on some ball-speed datasets, so benchmark both on your data.",
+    "evidence": "TrackNetV2 summary via Papers with Code (https://astro.paperswithcode.com/paper/tracknetv2-efficient-shuttlecock-tracking); TrackNetV4 arXiv 2409.14543 (https://arxiv.org/pdf/2409.14543); RacketVision arXiv 2511.17045 (https://arxiv.org/html/2511.17045v3); badminton all-deep system arXiv 2308.12645 (https://arxiv.org/abs/2308.12645).",
+    "effort": "medium"
+   },
+   {
+    "method": "Event-level structure: the racket-sport and basketball stat repos typically detect the ball, detect the player, then fire a shot/event from trajectory features (trajectory curve fit to make/miss, in basketball shot repos chonyy/basketball-shot-detection and anishcd/basketball-shot-detection) and link events to the nearest or most active player by spatial proximity.",
+    "how_it_applies": "Robo Scout's Hive-entry problem (only 1 of many found because trajectories break mid-air) can be handled by fitting a smooth parametric trajectory (e.g. a parabola in image space) through gap-tolerant ball detections, then deciding entry by intersection with the Cell box, instead of requiring continuous tracks. This is the pattern in the basketball make/miss repos, adapted to rising balls.",
+    "evidence": "chonyy/basketball-shot-detection (https://www.github.com/chonyy/basketball-shot-detection): trajectory curve fit to ball detections, make/miss color coding. anishcd/basketball-shot-detection (https://github.com/anishcd/basketball-shot-detection). nitinhemaraj/Basketball-shot-detection (YOLOv8 based; README claims 97% shot detection accuracy, unverified).",
+    "effort": "medium"
+   },
+   {
+    "method": "Tracking-by-detection with ByteTrack for lightweight multi-object tracking, with a thesis benchmark on basketball: ByteTrack beat BoT-SORT with MOTA 0.876 and IDF1 0.937 at 43.77 ms per frame using YOLOv8.",
+    "how_it_applies": "Swap or compare the tracker against your current setup for the robot track layer. ByteTrack keeps low-confidence boxes in association, which can help when robots occlude each other briefly. Pair with appearance re-ID for similar robots, because IDF1 measures exactly the identity swaps you are seeing.",
+    "evidence": "UGM thesis on basketball player tracking, etd.repository.ugm.ac.id (https://etd.repository.ugm.ac.id/home/detail_pencarian_downloadfiles/1666472); the search summary also cites a Hugging Face racquet-sports-analyzer using YOLO11n-pose with ByteTrack (unverified, no model card metadata).",
+    "effort": "small"
+   },
+   {
+    "method": "Camera calibration / homography from image to court plane, so per-robot position is checked in court coordinates rather than pixel boxes. The baseline maps each box bottom to the ground plane via a homography and scores in pitch space.",
+    "how_it_applies": "For a fixed camera, a one-time homography to the field or Cell plane lets you test which robot is near a launch or Hive entry using physical distance. This is a cheap way to reduce cross-robot credit errors because the nearest robot in court coordinates is a stronger attribution cue than image overlap.",
+    "evidence": "SoccerNet-GSR baseline arXiv 2404.11335 (pitch localization with TVCalib, homography from bounding box bottom to pitch); winner arXiv 2504.06357 (SegFormer-based camera parameter estimation).",
+    "effort": "medium"
+   }
+  ],
+  "recommendation": "Fix identity and attribution first, as tracklet-level pipelines do: (1) add an appearance re-ID embedding per robot and associate with StrongSORT/ByteTrack-style tracking, (2) replace per-frame identity labels with majority voting inside each robot tracklet (plus embedding clustering for alliance), (3) score with an attribute-aware GS-HOTA-style metric and run oracle ablations to find the bottleneck, and (4) for ball and Hive entries, fit smooth trajectories through gapped detections (or try a TrackNetV2-style multi-frame heatmap model for the 10 px Pollen balls) and decide entry by intersection with the Cell region. Sources: arXiv 2404.11335, arXiv 2504.06357, TrackNetV2 via Papers with Code, arXiv 2409.14543."
+ },
+ {
+  "topic": "code audit: shots and entries",
+  "findings": [
+   {
+    "method": "Origin gate: a trail only becomes a shot if the ball is inside the tracked robot's upper-body box within 0.17 s before its first sample. Any trail that starts after the ball has left the box, or where the box is missing, is rejected.",
+    "how_it_applies": "Missed shots. Fragments that begin mid-flight (after a dropout or occlusion) can never pass, and a None robot box at that time is silently skipped, so the shot is dropped with no error.",
+    "evidence": "backend/launches.py:116-127 (_source, delay loop, containment test at 125), 119-120 (None box continues), 40-52 (RobotBoxes.at returns None for gaps >0.22 s or >0.06 s past the end)",
+    "effort": "medium"
+   },
+   {
+    "method": "Trail termination on dropout: a trail is retired when no blob is seen for max(0.075, 2.25/fps) s, and every trail is also retired after 1.3 s from its first observation. At 60 fps the dropout limit is about 4.5 frames.",
+    "how_it_applies": "Flights that pass behind the Cell rim or get missed for a few frames are split or truncated. The orphaned pieces then fail the origin gate in finding 1, so the whole shot is lost. Long lobs over 1.3 s are cut the same way.",
+    "evidence": "backend/launches.py:320 (stale_after), 343 (alive test with 1.3 s cap), 346-348 (retire-and-attribute only when stale)",
+    "effort": "medium"
+   },
+   {
+    "method": "Camera-cut and large-motion frames clear every active trail without evaluating it. Only trails retired at line 346 or at end-of-video (361-364) are passed to attributed().",
+    "how_it_applies": "Any in-flight shot that overlaps a broadcast cut, pan, replay or overlay animation (more than 28% of pixels changing) is discarded silently. This is a direct missed-shot path that is easy to fix.",
+    "evidence": "backend/launches.py:350-353 (active = [] with no attributed call), 346 and 361-364 (the only emission points)",
+    "effort": "small"
+   },
+   {
+    "method": "Blob gating is absolute and motion-based. The residual test requires mean motion >=8 and 23% of ball pixels with diff >13. A global gate skips blob detection entirely when fewer than 9 pixels changed. Frames are downscaled to 960 wide, and the scale switches to 1536 when config.robots is non-empty.",
+    "how_it_applies": "The apex and the slow approach to the opening are the lowest-motion phases, so they are the ones most likely to fail. A 10 px Pollen ball at 960 px is about 7 px. The same video yields different detections depending on whether robots are configured, so results are not stable across configs.",
+    "evidence": "backend/launches.py:64-73 (size, area, aspect and residual gates), 71-72 (residual motion test), 354 (whole-frame gate), 288-289 (960 vs 1536 scale switch), 339 (INTER_AREA resize)",
+    "effort": "medium"
+   },
+   {
+    "method": "Rise and velocity gates reject real launches. Initial upward velocity must exceed 0.18*height. The rise must be at least max(0.028*height, 1.6 diameter) and must reach 0.02*height above the robot top. The upward run stops on any +0.012*height jitter and is capped at 0.65 s.",
+    "how_it_applies": "Low or lobbed shots, shots whose apex is hidden by the robot body, and shots with one noisy frame in the rise are rejected or truncated. Truncation also feeds the classifier a shorter sample (see finding 14).",
+    "evidence": "backend/launches.py:146-149 (velocity gate), 158-162 (upward run; 159 for the 0.65 s cap and 0.012*height jitter stop), 165-167 (rise and lowest_y rules)",
+    "effort": "small"
+   },
+   {
+    "method": "A shot classifier hard-filters launches before they are counted or matched to Hive entries. The floor is 0.4, and the code comment says it removed 1 of 20 real shots on one held-out match.",
+    "how_it_applies": "Each launch the classifier rejects is never emitted as a shot. Its Hive entry is also lost, because verified_candidates only sees the launches that survived the filter. The loss is about 5% of real shots on that match, and the threshold rests on one match.",
+    "evidence": "backend/vision.py:16-18 (load and filter before event creation), 979 (verified_candidates receives the filtered launches); backend/shot_model.py:53-55 (SHOT_FLOOR and the 1-of-20 note), 58-64 (likely_shot)",
+    "effort": "small"
+   },
+   {
+    "method": "Attribution uses a margin test on source_error. Two candidates within 0.16 of each other cause the shot to be dropped, not reassigned. source_error is the box-centre offset in box widths plus 1.5 times the back-projection delay, so it favours centre proximity and a late delay, not the true launcher.",
+    "how_it_applies": "When two alliance robots' boxes both contain the launch origin, which is common in a cluster, the shot is missed. When the margin passes, the chosen robot is the one whose centre is closest, which is not necessarily the one that fired.",
+    "evidence": "backend/launches.py:294-303 (attributed, margin test at 303), 180-183 (source_error formula)",
+    "effort": "medium"
+   },
+   {
+    "method": "Identity errors feed straight into the origin test. Each team's box is taken from frame[\"robots\"][team], and the identity model is about 87% accurate. RobotBoxes.at interpolates across consecutive frames whenever the centres move less than max(30, 1.25 box width).",
+    "how_it_applies": "After an identity swap between two nearby, similar robots, the swapped box is within the continuity gate, so the interpolated box blends the two robots. A launch from robot B then passes team A's origin test and is credited to A. This matches the reported swaps.",
+    "evidence": "backend/launches.py:34-38 (per-team box selection; missing team yields None), 44-49 (interpolation and continuity gate at 47-48)",
+    "effort": "medium"
+   },
+   {
+    "method": "Attribution ownership during merging and dedupe. Cross-team stitching lets the earlier fragment keep its team and absorbs later fragments from another team. Dedupe keeps the highest-confidence candidate, not the one whose origin fits best.",
+    "how_it_applies": "The team credited to a merged or deduplicated shot is set by timing and confidence, not by geometry. A correct fragment from the right robot can be discarded in favour of a wrong-robot fragment with higher confidence.",
+    "evidence": "backend/launches.py:202-203 (cross-team window 0.42 s), 216-223 (cross-team merge), 227-230 (prior team kept), 242 (dedupe sorted by confidence only)",
+    "effort": "small"
+   },
+   {
+    "method": "Duplicate tolerance is narrower than one frame. Two samples match only if dt < 0.016 s, but at 60 fps the frame period is 0.01667 s. The time window also uses the back-projected launch time, which varies with delay by up to 0.17 s.",
+    "how_it_applies": "A ball tracked in two fragments with a one-frame offset never counts as a duplicate, so the same shot is counted twice. Two candidates for the same shot can also fall outside the 0.17 s window and survive.",
+    "evidence": "backend/launches.py:253 (dt < 0.016 test), 246 (0.17 s time window), 177 and 116 (back-projected time varies with delay)",
+    "effort": "small"
+   },
+   {
+    "method": "Hive mouth scan only detects Pollen. Detection is YOLO filtered to the pollen class, with a yellow-only colour fallback, and verified_candidates skips every non-pollen launch.",
+    "how_it_applies": "Red and blue Nectar entries are structurally impossible to find, so every Nectar entry is missing from the output regardless of tracking quality. This is a large, direct cause of finding only one entry.",
+    "evidence": "backend/hive_entries.py:81 (yellow-only HSV range), 134 and 157 (classes=pollen), 243 (launch[\"kind\"] != \"pollen\" skip)",
+    "effort": "medium"
+   },
+   {
+    "method": "Hive arrival geometry is strict and brittle. arrival() needs a downward crossing of the lip with at least 0.16*height of prior rise, and rejects any single later sample outside the x-range or below the box. settled_entry() needs an unbroken inside run, and the run ends at the first sample outside. Tracks are finalized after 0.18 s without a detection.",
+    "how_it_applies": "A rising entry in this low side view fails the descent test (line 26). A single stray detection or a rim occlusion of more than 0.18 s splits or kills the track, so the entry is never found. At 30 Hz sampling (stride 2 at 60 fps), about 4 to 6 samples per transit are available to meet the 0.13 to 0.18 s rest requirements.",
+    "evidence": "backend/hive_entries.py:24-26 (descent and prior-rise rule), 29 (any out-of-box sample rejects), 32-36 (settle window), 58-62 (unbroken inside run), 194 (0.18 s track gap), 126 and 149 (rate 30 Hz)",
+    "effort": "medium"
+   },
+   {
+    "method": "Projected linking has a time bug. projected_quality compares the extrapolated x against the Cell entry x at hit.time, but it only extrapolates for min(gap, 0.27) seconds. Gaps up to 0.84 s are allowed.",
+    "how_it_applies": "For any gap longer than 0.27 s, the projection is evaluated at the wrong time and is compared against the wrong x, so a correct match is rejected. This is a deterministic cause of missed Hive links for the slow shots that most need linking. Constant horizontal velocity means the projection should use the full gap.",
+    "evidence": "backend/hive_entries.py:219 (gap window .03 to .84 s), 221 (x taken at hit.time), 223 (projected = last + v*min(gap, .27)), 224-225 (error tolerance .038)",
+    "effort": "small"
+   },
+   {
+    "method": "Exact overlap relies on two time bases. The mouth scan timestamps are index/fps, while the launch tracker uses decoded pts. Exact overlap needs samples within 0.063 s of each other.",
+    "how_it_applies": "If pts and index/fps drift by more than about one frame (variable-rate or screen recordings, seek offsets), exact overlap fails and matching falls back to the projected path, which only accepts single-team matches. This is plausible but not verified against the video's timestamps.",
+    "evidence": "backend/hive_entries.py:177 (index/fps), 208 (gap <= .063); backend/launches.py:327-332 (pts and fallback time)",
+    "effort": "small"
+   },
+   {
+    "method": "Duplicate and ambiguous Hive matches. One physical ball can yield two finds when its track is split (find_arrivals finalizes the track after a 0.18 s gap, and both halves can qualify). The second find can then project-match a different same-team launch. Ties within a team are accepted without a margin check, and earlier finds claim launches first.",
+    "how_it_applies": "A phantom Hive entry can be credited to a shot that did not enter. Tie acceptance can pick an arbitrary launch. This is plausible and not verified on the labeled videos.",
+    "evidence": "backend/hive_entries.py:194-201 (split tracks, finds from finished and active tracks), 240 (earliest find first), 249-253 (projected and exact selection, same-team acceptance at 253)",
+    "effort": "medium"
+   },
+   {
+    "method": "Silent gating upstream of Hive matching. Hive scanning is disabled when camera_motion is set. Each alliance needs exactly one marked cell, otherwise it is skipped. A failed mouth scan only logs a warning and falls back to launch paths. The entry time window is 0.18 to 1.55 s from the back-projected launch time.",
+    "how_it_applies": "Entries are missing for whole matches or alliances without any error in the results, and shots whose flight takes longer than 1.55 s, or is shorter than 0.18 s, cannot link.",
+    "evidence": "backend/vision.py:2 (camera_motion gate), 4-6 (exactly one cell mark), 34-38 (warning fallback), backend/hive_entries.py:243-244 (0.18 to 1.55 s window)",
+    "effort": "small"
+   },
+   {
+    "method": "The shot classifier scores only the upward run, with raw count features. Its inputs come from launch[\"samples\"], which stops at the apex. Features such as len(time) and duration depend on the detection sampling rate, and the loader returns None silently on a bad file.",
+    "how_it_applies": "Scores depend on frame rate and on where the rise ends, not on the full flight, so a shot that reaches the Cell can look like a non-shot. Load failures disable the classifier with no signal. This is plausible and needs a check against the training data.",
+    "evidence": "backend/vision.py:18 and 24 (scores and stores launch[\"samples\"]), backend/launches.py:184-187 (samples = upward run), backend/shot_model.py:26 (raw count features), 46-50 (silent None on error)",
+    "effort": "medium"
+   }
+  ],
+  "recommendation": "Make the launch tracker survive occlusion and cuts before changing any scoring: in backend/launches.py, call attributed() on trails before clearing them at the camera-cut reset (lines 352-353), and allow dropout gaps of about 0.2 to 0.25 s with motion-predicted continuation instead of the 0.075 s stale limit (line 320). Then fix the projection time bug at backend/hive_entries.py:223 and add Nectar colors to the mouth scan (lines 81, 134, 157, 243). This is one change to the tracker plus two targeted fixes, and each should be validated against the ~20 labeled videos, since I did not run the pipeline."
+ },
+ {
+  "topic": "code audit: robot tracking",
+  "findings": [
+   {
+    "method": "Team tracks choose detections independently, with no global assignment",
+    "how_it_applies": "analyze() calls tracking.advance() for each team in roster order, all against the same `robots` list (vision.py:873, built at 831-841). Each TeamTrack picks its own best box (reidentify 244-288, recognize 299-326, named 361-368). Nothing prevents two teams from locking the same physical robot, and nothing assigns one detection per team. Earlier teams in dict order get first pick. The collision check at vision.py:878-884 only reverts the later state and sets the box to None. It does not decide which team is correct. scipy linear_sum_assignment is already imported (vision.py:10) but is not used for team-to-detection matching.",
+    "evidence": "backend/vision.py:862-885, 873, 878-884; scipy import at backend/vision.py:10",
+    "effort": "medium"
+   },
+   {
+    "method": "Appearance signature is color-only and cannot separate same-alliance robots",
+    "how_it_applies": "signature() builds HSV histograms with 18x3x3 bins over the top and bottom halves of the box (vision.py:44-56). It carries no shape, texture, number, or position information. Same-alliance robots share the same team color, so similarity() (105-108) is nearly equal for both. The Identity gallery (111-141) and reidentify scoring (iou + similarity - distance penalty, 274-278) then decide on overlap and position alone, and the .08 margin (279) collapses to ties near crossings. AppearanceRecovery's hue tint (backend/robot_recovery.py:22-60, _tint at 76-80) has the same blind spot.",
+    "evidence": "backend/vision.py:44-56 (signature), 105-108 (similarity), 111-141 (Identity), 274-281 (scoring and margin); backend/robot_recovery.py:22-60, 76-80",
+    "effort": "medium"
+   },
+   {
+    "method": "Position-only gating widens over time and then falls back to appearance alone",
+    "how_it_applies": "In reidentify, reach = side*(.6+.15*min(since_verified,20)) (vision.py:255-256) grows to about 3.6 robot widths. plausible() accepts any box within that reach (259-262). After since_verified > 30 (268) the whole candidate set is accepted, and Identity.choose decides on appearance alone with minimum .62 (269-271). Same-color rivals pass that threshold, so a dropout longer than 30 samples can reacquire the wrong robot.",
+    "evidence": "backend/vision.py:252-272",
+    "effort": "small"
+   },
+   {
+    "method": "The named-detection path skips all spatial and classifier gating and jumps the track",
+    "how_it_applies": "When the main detector emits a robot_<team> class (targets[team], built at 777 and 833-841), reidentify is skipped entirely because of `if generic and not named` (vision.py:356). Then `max(named, ...)` is accepted at confidence >= .48, or >= .30 with agreement (361-365), with no plausible() or prior-distance check. On accept, the RobotTrack and nano tracker are rebuilt on that box (368-370). A single misclassified box from the team-class detector therefore becomes a full identity jump.",
+    "evidence": "backend/vision.py:356, 361-371, 777, 833-841",
+    "effort": "small"
+   },
+   {
+    "method": "The identity classifier is bypassed in the common path and only gates the rare path",
+    "how_it_applies": "TeamTrack.classify is assigned at vision.py:867 but is consumed only inside reidentify -> recognize (263-264). reidentify runs only when there is no named detection (356). recognize() accepts a classifier-confident box only if top >= .7 and margin >= .3, and only if it is near the track or persists for 3 samples (311-320). Otherwise its fallback ranks nearby boxes by iou + 1.5*p with a p >= .05 cutoff (321-322). That cutoff is near zero, and the 1.5 weight lets a geometrically closer rival with low team probability beat the true robot. The classifier never acts as a hard veto. The recognize() docstring claims a robot the classifier rules out is never followed, but the code does not enforce that.",
+    "evidence": "backend/vision.py:263-264, 299-326 (esp. 307-322), 356, 867",
+    "effort": "small"
+   },
+   {
+    "method": "Classifier is silently absent in several cases",
+    "how_it_applies": "Identity classifiers are built only if the separate robot.pt detector loaded (vision.py:757-758 and the block through 766). A StopIteration from the shared model is swallowed (`except StopIteration: pass`, 766-767). If no identity-<team>.pt exists and identity.pt lacks the team, the track falls back to the color-only path with no warning. has_identity_model/identity warnings (778-781) do not cover this case. Callers therefore cannot tell from the output whether identity correction ran.",
+    "evidence": "backend/vision.py:757-767, 777-781",
+    "effort": "small"
+   },
+   {
+    "method": "Per-team binary classifier and renormalization limits",
+    "how_it_applies": "Per-team models are two-class (team vs other), built in TeamClassifier (71-87). Their probability for a robot is computed with no context from the alliance partner. The shared model renormalizes over rivals only for teams the model knows (83-87, 96-101). Because roster teams the model does not know are silently dropped from `rivals`, the probability can be inflated for a rival with an unseen class. The classifier also runs only on crops of boxes with no temporal smoothing beyond the 3-sample rule in recognize.",
+    "evidence": "backend/vision.py:71-101, 311-320",
+    "effort": "medium"
+   },
+   {
+    "method": "Snap and template fallbacks are identity-agnostic",
+    "how_it_applies": "RobotTrack.advance replaces the estimate with a 70/30 blend toward the highest-IoU detection of any robot (vision.py:186-190), with no identity check. It falls back to grayscale TM_CCOEFF_NORMED template matching over the padded search window with threshold .69 (192-199). A same-shape rival inside the window matches, and the color signature is not consulted. These are the main routes by which the feature track follows the rival during overlap.",
+    "evidence": "backend/vision.py:168-212 (snap 186-190, template 192-199)",
+    "effort": "small"
+   },
+   {
+    "method": "Identity gallery learns from detections that may already be wrong",
+    "how_it_applies": "Identity.confirm adds the chosen box to a rolling gallery of 8 (vision.py:128-131). reidentify calls confirm when agreements % 10 == 0 and similarity to the seed >= .5 (286-287). The .5 threshold is loose for same-color robots, and the sample is the box chosen by the same possibly-wrong logic. This creates a feedback loop: a swap teaches the gallery the rival's appearance, which then reinforces the swap. The seed is permanent, but the rolling gallery is not anchored to it.",
+    "evidence": "backend/vision.py:111-141, 286-287",
+    "effort": "small"
+   },
+   {
+    "method": "Collision rollback restores only part of the track state",
+    "how_it_applies": "Before advancing, analyze() snapshots (copy(tracker), supported) per team (vision.py:871-872). On a collision (IoU > .50 at 878-881) it restores only tracker and supported (882-884) and sets the box to None. Not restored: the nano tracker (mutated in place by nano.update at 333), the AppearanceRecovery state, identity gallery updates from reidentify (286-287), recognize's pending counter (313-320), since_verified, agreements, and identity_frames. The next frame therefore starts from a partly corrupted state, and the same ambiguity recurs.",
+    "evidence": "backend/vision.py:870-885, 333, 286-287, 313-320",
+    "effort": "medium"
+   },
+   {
+    "method": "Nano tracker is re-seeded from whatever box was selected",
+    "how_it_applies": "follow() calls reset_nano(best) whenever the box is not already the robot (vision.py:290-294). Named acceptance and recovery do the same (368-370, 352), and nano_box() tracks appearance only (330-345). Once a wrong box is selected, the nano template is rebuilt from the rival, so the appearance tracker reinforces the swap instead of correcting it.",
+    "evidence": "backend/vision.py:290-294, 330-345, 352, 368-370",
+    "effort": "small"
+   },
+   {
+    "method": "Detector outputs are merged without de-duplication",
+    "how_it_applies": "robot.pt detections are appended to the generic robots list (vision.py:831-834). The main model's 'robot' class is appended too (840-841). There is no NMS or cross-detector dedupe. The same physical robot can appear twice with near-identical boxes, which makes reidentify's len(candidates)==1 shortcut (270s) and the margin tests (279, 396 region) unreliable. Duplicates also push the scoring toward the held-box fallback (276-281).",
+    "evidence": "backend/vision.py:831-841, 265-281",
+    "effort": "small"
+   },
+   {
+    "method": "Refinement is appearance-only and resolves collisions by deleting boxes",
+    "how_it_applies": "track_refinement.track_direction seeds one TrackerNano per team from human anchors (track_refinement.py:34-61). It uses no identity classifier and no exclusivity between teams. refine_roster nulls a team box when it overlaps another team box > .49, except on anchor frames (refine_roster lines 112-118), instead of reassigning it. merge_box (69-88) either averages forward and backward hits when overlap >= .26 or picks the closer-in-time hit (< .8 s), so a swap in one direction is blended or dropped. The refined robots feed match_tracks and shot attribution, because the per-frame loop skips match_tracks when refine is True (vision.py:887-888 and 920-927).",
+    "evidence": "backend/track_refinement.py:34-61, 69-88, 91-121; backend/vision.py:700, 887, 920-927",
+    "effort": "medium"
+   },
+   {
+    "method": "Refinement is disabled for camera-motion matches",
+    "how_it_applies": "refine requires nano_params, anchors, and not camera_motion (vision.py:700). On moving-camera matches the bidirectional correction never runs, and the forward tracker's swaps are final. The identity logic above is then the only defense.",
+    "evidence": "backend/vision.py:700",
+    "effort": "small"
+   }
+  ],
+  "recommendation": "Replace the independent per-team choices with one per-frame assignment: build a team-by-detection cost matrix from the TeamClassifier probability, IoU to the last trusted box, and appearance similarity, then solve it with the already-imported linear_sum_assignment. Make the classifier a hard veto on every path, including the named-detection branch (vision.py:361-371) and the lost-track branch. Roll back the full per-team state (nano, recovery, gallery, pending) on collision instead of only tracker and supported (vision.py:870-885), and stop folding unverified detections into the identity gallery (vision.py:286-287)."
+ }
+]

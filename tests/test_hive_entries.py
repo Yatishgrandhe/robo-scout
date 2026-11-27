@@ -1,6 +1,6 @@
 import unittest
 
-from backend.hive_entries import arrival, settled_entry, verified_candidates
+from backend.hive_entries import arrival, resting_entries, settled_entry, verified_candidates
 from backend.main import linked_count
 from backend.rules import event, summarize
 
@@ -31,8 +31,11 @@ class HiveEntriesTest(unittest.TestCase):
         cells = {"red": self.box}
         observations = {"red": [(time + .5, [(x, y)]) for time, x, y in self.path]}
         self.assertIn(0, verified_candidates([launch], cells, {"1": "red"}, observations))
-        self.assertFalse(verified_candidates([launch, {**launch, "team": "2"}], cells,
-                                              {"1": "red", "2": "red"}, observations))
+        ambiguous = verified_candidates([launch, {**launch, "team": "2"}], cells,
+                                        {"1": "red", "2": "red"}, observations)
+        # The entry still counts, but neither robot is credited.
+        self.assertEqual([key for key in ambiguous if isinstance(key, int)], [])
+        self.assertEqual(len(ambiguous), 1)
 
     def test_entry_and_final_piece_use_separate_tallies(self):
         launch = event("pollen_launch", 1, "Shot", "", status="confirmed")
@@ -61,6 +64,20 @@ class SettledEntryTest(unittest.TestCase):
     def test_ball_already_in_cell_is_not_a_new_entry(self):
         path = [(t / 30, .44, .14) for t in range(12)]
         self.assertIsNone(settled_entry(path, self.box))
+
+
+class RestingEntryTest(unittest.TestCase):
+    box = (.38, .07, .49, .21)
+
+    def test_each_new_resting_ball_counts_once_until_the_cell_empties(self):
+        rows = [(t / 30, [(.41, .19)] + ([(.45, .19)] if t >= 30 else [])) for t in range(60)]
+        rows += [(2 + t / 30, []) for t in range(60)]          # Cell empty for 2 s: a TIP
+        rows += [(4 + t / 30, [(.41, .19)]) for t in range(30)]  # same spot after the TIP is a new entry
+        self.assertEqual([round(hit.time, 2) for hit in resting_entries(rows, self.box)], [0, 1, 4])
+
+    def test_flicker_of_a_resting_ball_is_not_a_new_entry(self):
+        rows = [(t / 30, [(.41, .19)] if t % 7 else []) for t in range(90)]
+        self.assertEqual(len(resting_entries(rows, self.box)), 1)
 
 
 if __name__ == "__main__":

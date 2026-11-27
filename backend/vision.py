@@ -102,6 +102,70 @@ class TeamClassifier:
         return scores
 
 
+class PlateReader:
+    """Read robot team-number plates with Tesseract and anchor tracks to them.
+
+    A team number read on a detected robot is the strongest identity evidence
+    in a side view: appearance classifiers confuse similar robots, plates do not.
+    Only roster numbers count, and a reading must repeat (`persist`) before a
+    track is moved.
+    """
+
+    def __init__(self, roster, every=15, persist=2):
+        import shutil
+        self.binary = shutil.which("tesseract")
+        self.roster = {team.strip(): team for team in roster}
+        self.every, self.persist = every, persist
+        self.calls, self.seen, self.anchors, self.reads = 0, {}, 0, 0
+
+    @property
+    def available(self):
+        return self.binary is not None and len(self.roster) > 1
+
+    def read(self, image):
+        import subprocess
+        import tempfile
+        gray = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
+        gray = cv.resize(gray, None, fx=4, fy=4, interpolation=cv.INTER_CUBIC)
+        _, binary = cv.threshold(gray, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU)
+        found = set()
+        for image in (binary, 255 - binary):
+            with tempfile.NamedTemporaryFile(suffix=".png") as handle:
+                cv.imwrite(handle.name, image)
+                try:
+                    text = subprocess.run([self.binary, handle.name, "-", "--psm", "11", "-c",
+                                           "tessedit_char_whitelist=0123456789"],
+                                          capture_output=True, text=True, timeout=10).stdout
+                except (OSError, subprocess.SubprocessError):
+                    return found
+            for word in text.split():
+                found.update(team for number, team in self.roster.items() if number in word)
+        return found if len(found) == 1 else set()
+
+    def check(self, native, detections, time):
+        """Return {team: box} for robots whose plate was read in at least `persist` recent checks."""
+        self.calls += 1
+        if self.calls % self.every:
+            return {}
+        h, w = native.shape[:2]
+        anchors = {}
+        for box in detections:
+            x0, y0, x1, y1 = (np.asarray(box) * (w, h, w, h)).astype(int)
+            if x1 - x0 < 12 or y1 - y0 < 12:
+                continue
+            teams = self.read(native[y0:y1, x0:x1])
+            if len(teams) != 1:
+                continue
+            team = teams.pop()
+            self.reads += 1
+            last = self.seen.get(team)
+            count = last[1] + 1 if last and time - last[0] < 3 and iou(last[2], box) > .2 else 1
+            self.seen[team] = (time, count, box)
+            if count >= self.persist:
+                anchors[team] = np.asarray(box)
+        return anchors
+
+
 def similarity(gallery, candidate):
     if candidate is None or not gallery:
         return 0.
@@ -754,6 +818,7 @@ def analyze(video: Path, config, progress, launch_video: Path | None = None, hiv
             except (OSError, RuntimeError, TypeError, ValueError):
                 warnings.append("Robot detector unavailable. Tracking used motion and appearance only.")
         identities = {}
+        plates = None
         if robot_model is not None:
             for team in [config.team, *(seed.team for seed in config.robots)]:
                 identity_weights = MODELS / f"identity-{team.strip()}.pt"
@@ -767,6 +832,11 @@ def analyze(video: Path, config, progress, launch_video: Path | None = None, hiv
                     pass  # The shared model has not seen this team.
                 except (OSError, RuntimeError, TypeError, ValueError):
                     warnings.append(f"Identity model for {team} unavailable. Tracking used position and appearance.")
+        if robot_model is not None and len(roster) > 1:
+            plates = PlateReader(list(roster), every=max(1, round(config.sample_fps)))
+            if not plates.available:
+                plates = None
+                warnings.append("Tesseract is unavailable. Robot tracks were not anchored to team plates.")
         flower_model = None
         flower_weights = MODELS / "flower-crop.pt"
         if flower_weights.is_file() and any(zone.kind == "flower" for zone in config.zones):
@@ -883,6 +953,22 @@ def analyze(video: Path, config, progress, launch_video: Path | None = None, hiv
                     if team in prior and (index, team) not in anchors:
                         trackers[team].tracker, trackers[team].supported = prior[team]
                         boxes[team] = None
+            if multi and plates is not None and robots and not any((index, team) in anchors for team in roster):
+                for team, box in plates.check(native_frame, robots, now).items():
+                    if boxes.get(team) is not None and iou(boxes[team], box) > .45:
+                        continue
+                    # The plate says this robot is `team`: move that track here and
+                    # clear any other track that was following this robot.
+                    for other, other_box in boxes.items():
+                        if other != team and other_box is not None and iou(other_box, box) > .45:
+                            boxes[other] = None
+                            # Unknown beats wrong: that team resumes when its own plate is read.
+                            trackers.pop(other, None)
+                    classify = trackers[team].classify if team in trackers else identities.get(team)
+                    trackers[team] = TeamTrack(frame, gray, box, config.field, None, nano_params)
+                    trackers[team].classify = classify
+                    boxes[team] = box
+                    plates.anchors += 1
             robot = boxes[config.team]
             if not refine:
                 match_tracks(tracks, observed, now, boxes if multi else robot, zones, config.team)
@@ -941,8 +1027,10 @@ def analyze(video: Path, config, progress, launch_video: Path | None = None, hiv
         if config.scan_shots and not config.camera_motion:
             for alliance in ("red", "blue"):
                 marked = [zone.box for zone in config.zones if zone.kind == "cell" and zone.alliance == alliance]
-                if len(marked) == 1:
-                    cells[alliance] = marked[0]
+                # A Hive has two Cells and each TIP swaps which one faces up, so
+                # both marked Cell positions are watched for entries.
+                for number, box in enumerate(marked[:2]):
+                    cells[alliance if number == 0 else f"{alliance}:{number + 1}"] = box
         if config.scan_shots:
             from .launches import scan_launches
 
@@ -977,14 +1065,18 @@ def analyze(video: Path, config, progress, launch_video: Path | None = None, hiv
                 warnings.append("The Hive crop scan was unavailable. Used launch paths for entry suggestions.")
             alliances = {team: seed.alliance for team, seed in roster.items()} if multi else {None: config.alliance}
             for i, hit in verified_candidates(launches, cells, alliances, observations).items():
-                launch = launches[i]
-                piece = launch["kind"]
+                launch = launches[i] if isinstance(i, int) else None
+                piece = launch["kind"] if launch is not None else "pollen"
                 row = event("cell_entry", hit.time, f"Possible {piece.replace('_', ' ').title()} Hive entry", "",
                             source="vision", piece=piece,
-                            evidence="The ball descended into the opening and slowed in the marked Cell. Check the release and whether it stayed inside.")
-                row["launch_time"] = launch["time"]
+                            evidence="The ball came into the marked Cell and came to rest. Check the release and whether it stayed inside."
+                            if launch is not None else
+                            "A ball came to rest in the Cell but no launch was linked. Check who shot it.")
+                if launch is not None:
+                    row["launch_time"] = launch["time"]
                 row["trajectory"] = hit.path
-                events.append({**row, "team": launch["team"]} if multi else row)
+                team = launch.get("team") if launch is not None else None
+                events.append({**row, "team": team} if multi and team is not None else row)
         end_cells = {}
         end_flowers = []
         used_launches = set()
@@ -1047,6 +1139,8 @@ def analyze(video: Path, config, progress, launch_video: Path | None = None, hiv
                 "coverage": round(coverage, 3), "mode": config.model, "device": device,
                 "segmentation": contour is not None, "identity_model": has_identity_model,
                 "identity_detections": sum(track.identity_frames for track in trackers.values()),
+                "plate_reads": plates.reads if plates is not None else None,
+                "plate_anchors": plates.anchors if plates is not None else None,
                 "appearance_recoveries": sum(track.recovery_frames for track in trackers.values()),
                 "effective_setup": effective,
                 "defense": defense,
