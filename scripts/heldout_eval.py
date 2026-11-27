@@ -58,6 +58,8 @@ def main():
         if state.get("state") != "processing":
             break
         print(f"  {state.get('stage')} {round(100 * (state.get('progress') or 0))}%", flush=True)
+    if state.get("state") == "error":
+        raise SystemExit(f"Analysis failed: {state.get('stage')}")
     # result.json holds this run's own detections; events.json also keeps earlier review decisions.
     events = json.loads((ROOT / "data/matches" / args.match / "result.json").read_text())["events"]
     app = Counter((event.get("team", config["team"]), "shot" if event["kind"].endswith("launch") else event["kind"])
