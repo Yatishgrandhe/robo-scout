@@ -69,7 +69,7 @@ def main():
             size = float(np.median([b[3] for b in boxes])) if boxes else 12 / w
             for cls, x, y in by_time[time]:
                 boxes = [b for b in boxes if abs(b[1] - x) > size or abs(b[2] - y) > size]
-                boxes.append((cls, x, y, size * 1.1, size * h / w * 1.6))
+                boxes.append((cls, x, y, size * 1.1, size * w / h * 1.3))
                 counts[(split, "flight")] += 1
             stem = f"{video}-{time:08.3f}"
             cv.imwrite(str(args.out / "images" / split / f"{stem}.jpg"), frame)
