@@ -38,6 +38,37 @@ def arrival(path, box, lip_fraction=.54):
     return None
 
 
+def settled_entry(path, box):
+    """A ball that comes into the Cell from outside, from any side, and then rests inside it.
+
+    Low side views show a ball rising into the opening and settling rather than
+    dropping past the lip. Resting (little motion for .18 s) separates a ball in
+    the Cell from one flying past in front of it.
+    """
+    x0, y0, x1, y1 = box
+    width, height = x1 - x0, y1 - y0
+
+    def inside(point):
+        return x0 + .04 * width < point[1] < x1 - .04 * width and y0 <= point[2] <= y1
+
+    for i in range(1, len(path)):
+        before, crossing = path[i - 1], path[i]
+        if inside(before) or not inside(crossing) or crossing[0] - before[0] > .17:
+            continue
+        stay = []
+        for point in path[i:]:
+            if not inside(point):
+                break
+            stay.append(point)
+        # A piece can roll on inside the Cell, so any still window after entry counts.
+        for start in stay:
+            rest = np.asarray([point for point in stay if 0 <= point[0] - start[0] <= .22])
+            if (len(rest) >= 3 and rest[-1, 0] - rest[0, 0] >= .13
+                    and np.ptp(rest[:, 2]) <= .15 * height and np.ptp(rest[:, 1]) <= .15 * width):
+                return Arrival(crossing[0], path)
+    return None
+
+
 def mouth_crop(box, width, height):
     x0, y0, x1, y1 = box
     dx, dy = x1 - x0, y1 - y0
@@ -92,7 +123,7 @@ def associate(active, points, time, box):
     active.extend([(time, *point)] for i, point in enumerate(points) if i not in matched)
 
 
-def scan_mouths(video: Path, cells, weights: Path | None, start, end, device, progress=None):
+def scan_mouths(video: Path, cells, weights: Path | None, start, end, device, progress=None, rate=30):
     """Detect Pollen in high-detail Cell crops, including between known launches."""
     model = None
     pollen = []
@@ -115,7 +146,7 @@ def scan_mouths(video: Path, cells, weights: Path | None, start, end, device, pr
             return observations
         first, last = round(start * fps), round(end * fps)
         cap.set(cv.CAP_PROP_POS_FRAMES, first)
-        stride = max(1, round(fps / 15))
+        stride = max(1, round(fps / rate))
         batch = []
 
         def detect():
@@ -166,7 +197,8 @@ def find_arrivals(observations, box):
                 finished.append(track)
         active = still_active
         associate(active, points, time, box)
-    return [found for track in finished + active if (found := arrival(track, box) or arrival(track, box, .40)) is not None]
+    return [found for track in finished + active
+            if (found := arrival(track, box) or arrival(track, box, .40) or settled_entry(track, box)) is not None]
 
 
 def overlap_quality(mouth_path, flight):

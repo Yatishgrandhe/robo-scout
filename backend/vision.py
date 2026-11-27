@@ -75,18 +75,31 @@ class TeamClassifier:
     models/identity.pt has one class per team it was trained on.
     """
 
-    def __init__(self, weights, device, team="team"):
+    def __init__(self, weights, device, team="team", roster=()):
         from ultralytics import YOLO
         self.model = YOLO(weights)
         self.device = device
         self.index = next(key for key, name in self.model.names.items() if name == team)
+        self.size = int(getattr(self.model, "overrides", {}).get("imgsz") or 128)
+        # With a shared model, only the robots in this match compete: the
+        # probability is renormalized over the roster teams the model knows.
+        known = {name: key for key, name in self.model.names.items()}
+        self.rivals = sorted({known[t] for t in roster if t in known} | {self.index}) if roster else None
 
     def __call__(self, frame, boxes):
         if not boxes:
             return []
-        results = self.model.predict([robot_crop(frame, box) for box in boxes], imgsz=128,
+        results = self.model.predict([robot_crop(frame, box) for box in boxes], imgsz=self.size,
                                      device=self.device, verbose=False)
-        return [float(result.probs.data[self.index]) for result in results]
+        scores = []
+        for result in results:
+            probs = result.probs.data
+            if self.rivals is not None:
+                total = float(sum(probs[i] for i in self.rivals))
+                scores.append(float(probs[self.index]) / total if total > 0 else 0.)
+            else:
+                scores.append(float(probs[self.index]))
+        return scores
 
 
 def similarity(gallery, candidate):
@@ -749,7 +762,7 @@ def analyze(video: Path, config, progress, launch_video: Path | None = None, hiv
                     if identity_weights.is_file():
                         identities[team] = TeamClassifier(identity_weights, device)
                     elif shared.is_file():
-                        identities[team] = TeamClassifier(shared, device, team.strip())
+                        identities[team] = TeamClassifier(shared, device, team.strip(), [t.strip() for t in roster])
                 except StopIteration:
                     pass  # The shared model has not seen this team.
                 except (OSError, RuntimeError, TypeError, ValueError):
@@ -937,6 +950,11 @@ def analyze(video: Path, config, progress, launch_video: Path | None = None, hiv
             progress(.73, "Finding launches at video frame rate")
             launches = scan_launches(launch_video or video, frames, config,
                                     lambda value, stage: progress(.73 + (.17 if cells else .24) * value, stage))
+            from .shot_model import ShotModel, likely_shot
+
+            shot_model = ShotModel.load(MODELS / "shot-motion.json")
+            if shot_model is not None:
+                launches = [launch for launch in launches if likely_shot(shot_model, launch["samples"])]
             for launch in launches:
                 kind = launch["kind"]
                 row = event(f"{kind}_launch", launch["time"], f"Possible {kind.replace('_', ' ').title()} launch",

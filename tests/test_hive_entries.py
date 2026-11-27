@@ -1,6 +1,6 @@
 import unittest
 
-from backend.hive_entries import arrival, verified_candidates
+from backend.hive_entries import arrival, settled_entry, verified_candidates
 from backend.main import linked_count
 from backend.rules import event, summarize
 
@@ -44,6 +44,23 @@ class HiveEntriesTest(unittest.TestCase):
         self.assertEqual(linked_count(events, launch["id"], "cell_entry"), 1)
         self.assertEqual(linked_count(events, launch["id"], "cell_ball"), 1)
         self.assertEqual(summarize(events)["confirmed"]["pollen"], {"shot": 1, "entered": 1, "scored": 1})
+
+
+class SettledEntryTest(unittest.TestCase):
+    box = (.38, .07, .49, .21)
+
+    def test_ball_rising_into_cell_and_resting_is_an_entry(self):
+        path = [(9.0, .43, .255), (9.03, .43, .237), (9.07, .43, .212), (9.1, .431, .189), (9.13, .431, .171),
+                (9.17, .431, .154), (9.2, .43, .143), (9.23, .43, .136), (9.27, .43, .133), (9.3, .431, .133)]
+        self.assertEqual(settled_entry(path, self.box).time, 9.1)
+
+    def test_ball_flying_through_cell_is_not_an_entry(self):
+        path = [(t / 30, .40 + t * .012, .25 - t * .02) for t in range(12)]
+        self.assertIsNone(settled_entry(path, self.box))
+
+    def test_ball_already_in_cell_is_not_a_new_entry(self):
+        path = [(t / 30, .44, .14) for t in range(12)]
+        self.assertIsNone(settled_entry(path, self.box))
 
 
 if __name__ == "__main__":
