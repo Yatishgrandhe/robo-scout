@@ -1043,6 +1043,33 @@ def analyze(video: Path, config, progress, launch_video: Path | None = None, hiv
             shot_model = ShotModel.load(MODELS / "shot-motion.json")
             if shot_model is not None:
                 launches = [launch for launch in launches if likely_shot(shot_model, launch["samples"])]
+            flight_weights = MODELS / "ball-flight.pt"
+            if flight_weights.is_file():
+                from ultralytics import YOLO
+
+                from .ball_flights import merge, scan_flights
+                from .launches import RobotBoxes, _nearest_robot
+
+                stage = "Following balls in flight with the trained detector"
+                capture = cv.VideoCapture(str(launch_video or video))
+                full_w, full_h = capture.get(cv.CAP_PROP_FRAME_WIDTH), capture.get(cv.CAP_PROP_FRAME_HEIGHT)
+                capture.release()
+                try:
+                    flights = scan_flights(launch_video or video, YOLO(flight_weights), device, frames[0]["time"],
+                                           frames[-1]["time"], progress=lambda value: progress(.88 + .03 * value, stage))
+                except (OSError, RuntimeError, ValueError, cv.error):
+                    flights = []
+                    warnings.append("The in-flight ball detector stopped. Used the color launch scan only.")
+                robot_boxes = ({seed.team: RobotBoxes(frames, full_w, full_h, seed.team) for seed in roster.values()}
+                               if multi else {None: RobotBoxes(frames, full_w, full_h)})
+                for flight in flights:
+                    flight["release"] = [flight["release_norm"][0] * full_w, flight["release_norm"][1] * full_h]
+                    flight["velocity"] = [flight["velocity_norm"][0] * full_w, flight["velocity_norm"][1] * full_h]
+                    team, ambiguous = _nearest_robot(flight, robot_boxes, full_h)
+                    flight["team"] = team
+                    if ambiguous:
+                        flight["ambiguous"] = ambiguous
+                launches = merge(launches, flights)
             for launch in launches:
                 kind = launch["kind"]
                 row = event(f"{kind}_launch", launch["time"], f"Possible {kind.replace('_', ' ').title()} launch",

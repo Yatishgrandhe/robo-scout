@@ -19,6 +19,9 @@ def main():
     parser.add_argument("--name", default="ftc")
     parser.add_argument("--workers", type=int, default=0, help="Data-loading processes")
     parser.add_argument("--weights", type=Path, default=ROOT / "models/yolo26n.pt")
+    parser.add_argument("--optimizer", default="auto", help="SGD with --lr0 for fine-tuning; auto ignores --lr0")
+    parser.add_argument("--lr0", type=float, default=None)
+    parser.add_argument("--patience", type=int, default=100)
     parser.add_argument("--tight-crops", action="store_true", help="Keep object scale and layout close to a marked Flower crop")
     args = parser.parse_args()
     if not args.name.replace("-", "").replace("_", "").isalnum():
@@ -27,7 +30,8 @@ def main():
     augmentation = {"mosaic": 0, "scale": .18, "translate": .06} if args.tight_crops else {}
     model.train(data=str(args.data.resolve()), epochs=args.epochs, imgsz=args.size,
                 batch=args.batch, workers=args.workers, cache=False, device=args.device, seed=408,
-                project=str(ROOT / "runs"), name=args.name, plots=False, **augmentation)
+                project=str(ROOT / "runs"), name=args.name, plots=False, optimizer=args.optimizer,
+                patience=args.patience, **({"lr0": args.lr0} if args.lr0 is not None else {}), **augmentation)
     destination = ROOT / "models" / f"{args.name}.pt"
     shutil.copyfile(model.trainer.best, destination)
     print(f"Checkpoint ready: {destination}")
