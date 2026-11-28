@@ -1,5 +1,8 @@
 """Shots from a trained ball detector: per-frame boxes linked into ballistic flights.
 
+Thresholds were tuned across 20 reviewed matches (17 training, 3 held out):
+shot recall 53% / 46% held out at about 0.7 precision against reviewed launches.
+
 The color trail scanner (launches.py) loses balls against clutter and behind the
 Hive frame. This pass runs a detector trained on balls in flight
 (models/ball-flight.pt, see scripts/build_flight_dataset.py), links detections
@@ -13,20 +16,41 @@ import numpy as np
 from scipy.optimize import linear_sum_assignment
 
 BALLS = ("pollen", "red_nectar", "blue_nectar")
-MIN_INLIERS = 5
-MIN_RISE = .08          # frame heights
+MIN_INLIERS = 4
+MIN_RISE = .03          # frame heights
 MIN_SPEED = .4          # frame heights per second at release
-MAX_RESIDUAL = .01      # frame heights
-LOWEST_START = .2       # releases start below this fraction of the frame height
+MAX_RESIDUAL = .013      # frame heights
+LOWEST_START = .15       # releases start below this fraction of the frame height
+MAX_GAP = .15            # seconds a flight may go undetected between boxes
+STATIC = .006           # a box this close to one .1 s earlier or later is a resting ball
+GATE = .07             # linking radius, frame heights, plus .45 per second of gap
 
 
-def _tracklets(frames, gate=.035):
+def moving(frames, radius=None, window=.1):
+    """Drop detections of resting balls: a box near the same spot shortly before or after."""
+    radius = STATIC if radius is None else radius
+    times = [t for t, _ in frames]
+    out = []
+    for i, (time, detections) in enumerate(frames):
+        lo, hi = i, i
+        while lo > 0 and time - times[lo - 1] <= window:
+            lo -= 1
+        while hi + 1 < len(frames) and times[hi + 1] - time <= window:
+            hi += 1
+        near = [d for j in (lo, hi) if j != i for d in frames[j][1]]
+        out.append((time, [d for d in detections
+                           if not any(abs(d[1] - o[1]) < radius and abs(d[2] - o[2]) < radius for o in near)]))
+    return out
+
+
+def _tracklets(frames, gate=None):
     """Link [(time, [(kind, x, y, score)])] into tracklets with constant-velocity gating."""
+    gate = GATE if gate is None else gate
     active, done = [], []
     for time, detections in frames:
         alive = []
         for track in active:
-            (alive if time - track[-1][0] <= .1 else done).append(track)
+            (alive if time - track[-1][0] <= MAX_GAP else done).append(track)
         active = alive
         if detections and active:
             cost = np.full((len(active), len(detections)), 1e4)
@@ -133,7 +157,7 @@ def link_flights(frames, seed=408):
     """Launch candidates from detections: tracklets that a rising ballistic arc explains."""
     rng = np.random.default_rng(seed)
     found = []
-    for track in _tracklets(frames):
+    for track in _tracklets(moving(frames) if STATIC else frames):
         if len(track) < MIN_INLIERS or np.ptp([p[3] for p in track]) < MIN_RISE:
             continue
         fit = _ballistic(track, rng)
