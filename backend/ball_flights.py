@@ -16,8 +16,8 @@ BALLS = ("pollen", "red_nectar", "blue_nectar")
 MIN_INLIERS = 5
 MIN_RISE = .08          # frame heights
 MIN_SPEED = .4          # frame heights per second at release
-MAX_RESIDUAL = .006     # frame heights
-LOWEST_START = .28      # releases start below this fraction of the frame height
+MAX_RESIDUAL = .01      # frame heights
+LOWEST_START = .2       # releases start below this fraction of the frame height
 
 
 def _tracklets(frames, gate=.035):
@@ -83,8 +83,8 @@ def _ballistic(track, rng):
     return first, best, speed, rise, cx[0]
 
 
-def scan_flights(video: Path, model, device, start, end, stride=2, progress=None):
-    """Return launch candidates (same shape as launches.scan_launches) from detector flights."""
+def detect_frames(video: Path, model, device, start, end, stride=2, progress=None):
+    """[(time, [(kind, x, y, score)])] for every stride-th frame, normalized coordinates."""
     capture = cv.VideoCapture(str(video))
     fps = capture.get(cv.CAP_PROP_FPS)
     if not capture.isOpened() or not np.isfinite(fps) or fps <= 0:
@@ -126,8 +126,12 @@ def scan_flights(video: Path, model, device, start, end, stride=2, progress=None
         flush()
     finally:
         capture.release()
-    # A ball resting on the floor or in a Cell is not a flight; drop static detections early.
-    rng = np.random.default_rng(408)
+    return frames
+
+
+def link_flights(frames, seed=408):
+    """Launch candidates from detections: tracklets that a rising ballistic arc explains."""
+    rng = np.random.default_rng(seed)
     found = []
     for track in _tracklets(frames):
         if len(track) < MIN_INLIERS or np.ptp([p[3] for p in track]) < MIN_RISE:
@@ -152,6 +156,11 @@ def scan_flights(video: Path, model, device, start, end, stride=2, progress=None
             "flight": [[round(p[0], 3), round(p[2], 5), round(p[3], 5)] for p in points],
         })
     return found
+
+
+def scan_flights(video: Path, model, device, start, end, stride=1, progress=None):
+    """Return launch candidates (same shape as launches.scan_launches) from detector flights."""
+    return link_flights(detect_frames(video, model, device, start, end, stride, progress))
 
 
 def merge(primary, extra):
