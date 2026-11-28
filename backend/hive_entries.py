@@ -76,6 +76,18 @@ def mouth_crop(box, width, height):
             min(width, round((x1 + .32 * dx) * width)), min(height, round((y1 + .56 * dy) * height)))
 
 
+SEARCH_BLUE_NECTAR = False
+# Balls come to rest on the Cell floor. Resting spots above it (roof corners,
+# frame bars, the crowd behind) are ignored. Tuned on 18 reviewed matches.
+FLOOR = .55    # resting balls sit below this fraction of the Cell box height
+MARGIN = .06   # and this fraction away from its sides
+
+
+def on_floor(box, x, y):
+    x0, y0, x1, y1 = box
+    return x0 + MARGIN * (x1 - x0) <= x <= x1 - MARGIN * (x1 - x0) and y0 + FLOOR * (y1 - y0) <= y <= y1
+
+
 def pollen_centers(image, detections, nectar=None):
     hsv = cv.cvtColor(image, cv.COLOR_BGR2HSV)
     yellow = cv.inRange(hsv, (16, 94, 118), (42, 255, 255))
@@ -90,7 +102,9 @@ def pollen_centers(image, detections, nectar=None):
     # only solid, round blobs of ball size remain.
     kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (7, 7))
     # Red Nectar is not searched: the red Cell's own frame passes the red test.
-    nectar_ranges = {"blue": ((96, 110, 50), (126, 255, 255))}
+    # Blue Nectar is off by default: across 18 reviewed matches the blue frame and
+    # blue clothing behind the Cell added more false entries than real ones.
+    nectar_ranges = {"blue": ((96, 110, 50), (126, 255, 255))} if SEARCH_BLUE_NECTAR else {}
     for ranges in [nectar_ranges[nectar]] if nectar in nectar_ranges else []:
         mask = cv.inRange(hsv, ranges[0], ranges[1])
         if len(ranges) > 2:
@@ -211,11 +225,10 @@ def occupancy(observations, box, near=.014, memory=1.0, rest=.4):
     Detections flicker behind the Cell mesh; remembering each resting spot for a
     second keeps the count steady, so only a real arrival raises it.
     """
-    x0, y0, x1, y1 = box
     spots, timeline = [], []
     for time, points in observations:
         for x, y in points:
-            if not (x0 <= x <= x1 and y0 <= y <= y1):
+            if not on_floor(box, x, y):
                 continue
             spot = next((s for s in spots if abs(s[0] - x) < near and abs(s[1] - y) < near), None)
             if spot is None:
@@ -249,10 +262,10 @@ def resting_entries(observations, box, rest=.4, near=.014, empty=1.5, baseline=1
     for time, points in observations:
         if time - start > baseline:
             break
-        fixed += [(x, y) for x, y in points if x0 <= x <= x1 and y0 <= y <= y1]
+        fixed += [(x, y) for x, y in points if on_floor(box, x, y)]
     fixed = [p for p in fixed if sum(abs(p[0] - q[0]) < near and abs(p[1] - q[1]) < near for q in fixed) >= 10]
     for time, points in observations:
-        points = [(x, y) for x, y in points if x0 <= x <= x1 and y0 <= y <= y1
+        points = [(x, y) for x, y in points if on_floor(box, x, y)
                   and not any(abs(x - fx) < near and abs(y - fy) < near for fx, fy in fixed)]
         if points:
             last_seen = time
