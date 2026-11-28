@@ -76,7 +76,7 @@ def mouth_crop(box, width, height):
             min(width, round((x1 + .32 * dx) * width)), min(height, round((y1 + .56 * dy) * height)))
 
 
-def pollen_centers(image, detections):
+def pollen_centers(image, detections, nectar=None):
     hsv = cv.cvtColor(image, cv.COLOR_BGR2HSV)
     yellow = cv.inRange(hsv, (16, 94, 118), (42, 255, 255))
     contours, _ = cv.findContours(yellow, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
@@ -86,6 +86,25 @@ def pollen_centers(image, detections):
         area = cv.contourArea(contour)
         if 5 <= w <= 31 and 5 <= h <= 36 and .40 <= w / h <= 2.0 and .48 * w * h <= area <= 550:
             centers.append((x + w / 2, y + h / 2))
+    # Nectar has the Cell's own color, so thin frame lines are opened away and
+    # only solid, round blobs of ball size remain.
+    kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (7, 7))
+    # Red Nectar is not searched: the red Cell's own frame passes the red test.
+    nectar_ranges = {"blue": ((96, 110, 50), (126, 255, 255))}
+    for ranges in [nectar_ranges[nectar]] if nectar in nectar_ranges else []:
+        mask = cv.inRange(hsv, ranges[0], ranges[1])
+        if len(ranges) > 2:
+            mask |= cv.inRange(hsv, ranges[2], ranges[3])
+        mask = cv.morphologyEx(mask, cv.MORPH_CLOSE, cv.getStructuringElement(cv.MORPH_ELLIPSE, (5, 5)))
+        mask = cv.morphologyEx(mask, cv.MORPH_OPEN, kernel)
+        contours, _ = cv.findContours(mask, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
+        for contour in contours:
+            x, y, w, h = cv.boundingRect(contour)
+            area = cv.contourArea(contour)
+            if 12 <= w <= 40 and 12 <= h <= 40 and .6 <= w / h <= 1.6 and .55 * w * h <= area:
+                center = (x + w / 2, y + h / 2)
+                if all((center[0] - px) ** 2 + (center[1] - py) ** 2 > 9 ** 2 for px, py in centers):
+                    centers.append(center)
     # Color preserves small, low-confidence detections and the trained
     # detector separates touching pieces when they form one color contour.
     for x0, y0, x1, y1, confidence, _ in detections:
@@ -158,7 +177,7 @@ def scan_mouths(video: Path, cells, weights: Path | None, start, end, device, pr
                 detections = [prediction.boxes.data.cpu().numpy() for prediction in predictions]
             for (team, time, image), boxes in zip(batch, detections):
                 left, top, right, bottom = crops[team]
-                centers = pollen_centers(image, boxes)
+                centers = pollen_centers(image, boxes, team.split(":")[0])
                 points = [(float((left + x / 256 * (right - left)) / width),
                            float((top + y / 240 * (bottom - top)) / height)) for x, y in centers]
                 observations[team].append((time, points))
@@ -186,7 +205,36 @@ def scan_mouths(video: Path, cells, weights: Path | None, start, end, device, pr
         cap.release()
 
 
-def resting_entries(observations, box, rest=.4, near=.01, empty=1.5):
+def occupancy(observations, box, near=.014, memory=1.0, rest=.4):
+    """[(time, balls resting in the Cell)], counting a spot seen within `memory` seconds.
+
+    Detections flicker behind the Cell mesh; remembering each resting spot for a
+    second keeps the count steady, so only a real arrival raises it.
+    """
+    x0, y0, x1, y1 = box
+    spots, timeline = [], []
+    for time, points in observations:
+        for x, y in points:
+            if not (x0 <= x <= x1 and y0 <= y <= y1):
+                continue
+            spot = next((s for s in spots if abs(s[0] - x) < near and abs(s[1] - y) < near), None)
+            if spot is None:
+                spots.append([x, y, time, time])
+            else:
+                spot[0], spot[1], spot[3] = x, y, time
+        spots = [s for s in spots if time - s[3] <= memory]
+        timeline.append((time, sum(s[3] - s[2] >= rest for s in spots)))
+    return timeline
+
+
+def adds_a_ball(timeline, when):
+    """A real entry leaves more balls resting in the Cell than at any moment shortly before it."""
+    before = [n for t, n in timeline if when - 1.2 <= t <= when - .2]
+    after = [n for t, n in timeline if when + .6 <= t <= when + 1.2]
+    return not before or not after or np.median(after) > np.median(before)
+
+
+def resting_entries(observations, box, rest=.4, near=.014, empty=1.5, baseline=1.5):
     """New balls that come to rest in the Cell, one per resting position until the Cell empties.
 
     A ball often drops onto the Cell floor in a frame or two, so no crossing is
@@ -195,8 +243,17 @@ def resting_entries(observations, box, rest=.4, near=.01, empty=1.5):
     """
     x0, y0, x1, y1 = box
     candidates, resting, found, last_seen = [], [], [], None
+    # Whatever rests in the Cell when the scan starts (frame parts, staged pieces) is not an entry.
+    start = observations[0][0] if observations else 0
+    fixed = []
     for time, points in observations:
-        points = [(x, y) for x, y in points if x0 <= x <= x1 and y0 <= y <= y1]
+        if time - start > baseline:
+            break
+        fixed += [(x, y) for x, y in points if x0 <= x <= x1 and y0 <= y <= y1]
+    fixed = [p for p in fixed if sum(abs(p[0] - q[0]) < near and abs(p[1] - q[1]) < near for q in fixed) >= 10]
+    for time, points in observations:
+        points = [(x, y) for x, y in points if x0 <= x <= x1 and y0 <= y <= y1
+                  and not any(abs(x - fx) < near and abs(y - fy) < near for fx, fy in fixed)]
         if points:
             last_seen = time
         if resting and last_seen is not None and time - last_seen > empty:
@@ -214,7 +271,10 @@ def resting_entries(observations, box, rest=.4, near=.01, empty=1.5):
                 resting.append((c[0], c[1]))
                 found.append(Arrival(c[2], c[4]))
         candidates = [c for c in candidates if time - c[3] < .2]
-    return found
+    # A ball nudged to a new spot is not an entry: the Cell must hold more balls than before.
+    timeline = occupancy([(t, [p for p in pts if not any(abs(p[0] - fx) < near and abs(p[1] - fy) < near
+                                                          for fx, fy in fixed)]) for t, pts in observations], box, near)
+    return [hit for hit in found if adds_a_ball(timeline, hit.time)]
 
 
 def find_arrivals(observations, box):
@@ -228,14 +288,23 @@ def find_arrivals(observations, box):
                 finished.append(track)
         active = still_active
         associate(active, points, time, box)
+    timeline = occupancy(observations, box)
     tracked = [found for track in finished + active
-               if (found := arrival(track, box) or arrival(track, box, .40) or settled_entry(track, box)) is not None]
+               if (found := arrival(track, box) or arrival(track, box, .40) or settled_entry(track, box)) is not None
+               and adds_a_ball(timeline, found.time)]
     width = box[2] - box[0]
     # A resting ball already explained by a tracked entry (same time and place) is not a second entry.
     extra = [hit for hit in resting_entries(observations, box)
              if not any(abs(hit.time - other.time) < .8 and abs(hit.path[-1][1] - other.path[-1][1]) < .15 * width
                         for other in tracked)]
-    return tracked + extra
+    merged = []
+    for hit in sorted(tracked + extra, key=lambda hit: hit.time):
+        # Two detections of one ball within half a second at the same spot are one entry.
+        if any(hit.time - other.time < .5 and abs(hit.path[-1][1] - other.path[-1][1]) < .15 * width
+               for other in merged):
+            continue
+        merged.append(hit)
+    return merged
 
 
 def overlap_quality(mouth_path, flight):

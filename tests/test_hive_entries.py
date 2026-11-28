@@ -69,15 +69,21 @@ class SettledEntryTest(unittest.TestCase):
 class RestingEntryTest(unittest.TestCase):
     box = (.38, .07, .49, .21)
 
+    empty = [(t / 30, []) for t in range(60)]  # the scan starts with an empty Cell
+
     def test_each_new_resting_ball_counts_once_until_the_cell_empties(self):
-        rows = [(t / 30, [(.41, .19)] + ([(.45, .19)] if t >= 30 else [])) for t in range(60)]
-        rows += [(2 + t / 30, []) for t in range(60)]          # Cell empty for 2 s: a TIP
-        rows += [(4 + t / 30, [(.41, .19)]) for t in range(30)]  # same spot after the TIP is a new entry
-        self.assertEqual([round(hit.time, 2) for hit in resting_entries(rows, self.box)], [0, 1, 4])
+        rows = self.empty + [(2 + t / 30, [(.41, .19)] + ([(.45, .19)] if t >= 30 else [])) for t in range(60)]
+        rows += [(4 + t / 30, []) for t in range(60)]          # Cell empty for 2 s: a TIP
+        rows += [(6 + t / 30, [(.41, .19)]) for t in range(30)]  # same spot after the TIP is a new entry
+        self.assertEqual([round(hit.time, 2) for hit in resting_entries(rows, self.box)], [2, 3, 6])
 
     def test_flicker_of_a_resting_ball_is_not_a_new_entry(self):
-        rows = [(t / 30, [(.41, .19)] if t % 7 else []) for t in range(90)]
+        rows = self.empty + [(2 + t / 30, [(.41, .19)] if t % 7 else []) for t in range(90)]
         self.assertEqual(len(resting_entries(rows, self.box)), 1)
+
+    def test_piece_resting_when_the_scan_starts_is_not_an_entry(self):
+        rows = [(t / 30, [(.41, .19)]) for t in range(120)]
+        self.assertEqual(resting_entries(rows, self.box), [])
 
 
 if __name__ == "__main__":
